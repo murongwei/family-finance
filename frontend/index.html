@@ -148,20 +148,58 @@
   <!-- 记一笔（后续独立成页） -->
   <div class="card-title">记一笔</div>
   <div class="form-card">
-    <div class="field"><label>金额（元）</label><input type="number" placeholder="0.00"></div>
+    <div class="field"><label>金额（元）</label><input type="number" id="amount" placeholder="0.00"></div>
     <div class="field"><label>分类</label>
-      <select><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
+      <select id="category"><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
     </div>
-    <div class="field"><label>备注</label><input type="text" placeholder="选填，一句话"></div>
-    <button class="btn">记下来</button>
+    <div class="field"><label>备注</label><input type="text" id="note" placeholder="选填，一句话"></div>
+    <button class="btn" id="addBtn">记下来</button>
   </div>
 
   <!-- 最近账目（后续独立成页） -->
   <div class="card-title">最近账目</div>
-  <div class="ledger">
-    <div class="entry"><div class="e-cat">餐</div><div class="e-info"><div class="e-name">饮食</div><div class="e-note">11-04 · 午餐</div></div><div class="e-amt">30</div></div>
-    <div class="entry"><div class="e-cat">行</div><div class="e-info"><div class="e-name">交通</div><div class="e-note">11-03 · 地铁</div></div><div class="e-amt">12</div></div>
+  <div class="ledger" id="ledgerList">
   </div>
 </div>
+<script>
+  async function loadLedger() {
+    const res = await fetch("/api/entries");
+    const data = await res.json();
+    console.log(data);
+
+    const list = document.getElementById("ledgerList");
+    list.innerHTML = "";
+    for (const item of data) {
+      list.innerHTML += `
+        <div class="entry">
+          <div class="e-cat">${item.category[0]}</div>
+          <div class="e-info">
+            <div class="e-name">${item.category}</div>
+            <div class="e-note">${item.date} · ${item.note || ""}</div>
+          </div>
+          <div class="e-amt">${item.amount}</div>
+        </div>
+      `;
+    }
+  }
+  loadLedger();
+
+  // ===== P1-3：记一笔 → POST 到后端 → 刷新列表 =====
+  async function addEntry() {
+    const amount = document.getElementById("amount").value;
+    const category = document.getElementById("category").value;
+    const note = document.getElementById("note").value;
+    const today = new Date().toISOString().slice(0, 10);
+
+    const res = await fetch("/api/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: today, category, amount: Number(amount), note }),
+    });
+    await res.json();
+    loadLedger();
+  }
+  document.getElementById("addBtn").onclick = addEntry;
+</script>
 </body>
 </html>
