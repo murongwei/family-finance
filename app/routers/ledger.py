@@ -67,38 +67,55 @@ def summary():
 
 @router.get("/overview")
 def overview():
-    """资金概览：可用资金/收入/4模块（期初资金从 settings 读，模块余额预算模拟）"""
+    """资金概览：可用资金 = 收入−支出−净投资投入(投入转去理财/赎回转回)；模块余额真实化"""
     with get_conn() as conn:
-        initial = float(_get_setting(conn, "initial", "0"))   # 期初资金（真实存款）
         inc = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
         ).fetchone()[0]
         exp = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='expense'"
         ).fetchone()[0]
-    income = inc
-    available = initial + income - exp    # 可用资金 = 期初 + 收入 − 支出（真实联动）
+        net_invest = conn.execute(
+            "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
+            "FROM invest_records"
+        ).fetchone()[0]
+        w = round(_get_principal(conn, "wenwen"), 2)
+        t = round(_get_principal(conn, "touzi"), 2)
+    available = round(inc - exp - net_invest, 2)   # 手上可用 = 收入 − 支出 − 投进理财的钱 + 赎回
     modules = [
-        {"name": "应急救命", "pct": 30, "current": 2000},
-        {"name": "稳健理财", "pct": 30, "current": 1900},
-        {"name": "个人投资", "pct": 30, "current": 1800},
-        {"name": "日常娱乐", "pct": 10, "current": 700},
+        {"name": "应急救命", "pct": 30, "current": 0},   # 应急/日常的钱在手边(可用资金里)
+        {"name": "稳健理财", "pct": 30, "current": w},
+        {"name": "个人投资", "pct": 30, "current": t},
+        {"name": "日常娱乐", "pct": 10, "current": 0},
     ]
     for m in modules:
         m["plan"] = round(available * m["pct"] / 100)   # 应分配 = 可用 × 比例
-    return {"available": available, "income": income, "modules": modules}
+    return {"available": available, "income": inc, "modules": modules}
 
 
 @router.get("/assets")
 def assets():
-    """总资产页：自己拥有的全部 = 4资金模块余额之和（模拟，后填真实）"""
+    """总资产页 = 手上可用 + 稳健理财本金 + 个人投资本金（投资盈亏见投资页市值）"""
+    with get_conn() as conn:
+        inc = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
+        ).fetchone()[0]
+        exp = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='expense'"
+        ).fetchone()[0]
+        net_invest = conn.execute(
+            "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
+            "FROM invest_records"
+        ).fetchone()[0]
+        avail = round(inc - exp - net_invest, 2)
+        w = round(_get_principal(conn, "wenwen"), 2)
+        t = round(_get_principal(conn, "touzi"), 2)
     modules = [
-        {"name": "应急救命", "pct": 30, "current": 2000},
-        {"name": "稳健理财", "pct": 30, "current": 1900},
-        {"name": "个人投资", "pct": 30, "current": 1800},
-        {"name": "日常娱乐", "pct": 10, "current": 700},
+        {"name": "手上可用", "current": avail},
+        {"name": "稳健理财", "current": w},
+        {"name": "个人投资", "current": t},
     ]
-    total = sum(m["current"] for m in modules)
+    total = round(sum(m["current"] for m in modules), 2)
     for m in modules:
         m["ratio"] = round(m["current"] / total * 100) if total else 0   # 每模块占比
     return {"total": total, "modules": modules}
@@ -114,34 +131,6 @@ def trend():
         ).fetchall()
     rows = rows[::-1]   # 升序：早 → 晚
     return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
-
-
-class Settings(BaseModel):
-    """资金设置：期初资金 + 各投资模块投入本金"""
-    initial: float = 0
-    wenwen_principal: float = 0
-    touzi_principal: float = 0
-
-
-@router.get("/settings")
-def get_settings():
-    """读取资金设置：期初资金 + 各投资模块投入本金"""
-    with get_conn() as conn:
-        return {
-            "initial": float(_get_setting(conn, "initial", "0")),
-            "wenwen_principal": float(_get_setting(conn, "wenwen_principal", "0")),
-            "touzi_principal": float(_get_setting(conn, "touzi_principal", "0")),
-        }
-
-
-@router.post("/settings")
-def save_settings(s: Settings):
-    """保存资金设置（填真实数据后盈亏激活）"""
-    with get_conn() as conn:
-        for k, v in [("initial", s.initial), ("wenwen_principal", s.wenwen_principal),
-                     ("touzi_principal", s.touzi_principal)]:
-            conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", (k, str(v)))
-    return {"ok": True}
 
 
 QUOTES_TTL = 300          # 行情缓存 5 分钟

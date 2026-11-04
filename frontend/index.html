@@ -165,14 +165,6 @@
       <div class="field"><label>备注</label><input type="text" id="incNote" placeholder="选填，一句话"></div>
       <button class="btn" id="incBtn">记收入</button>
     </div>
-
-    <div class="card-title">资金设置</div>
-    <div class="form-card">
-      <div class="field"><label>期初资金（元）</label><input type="number" id="setInitial" placeholder="0.00"></div>
-      <div class="field"><label>稳健理财投入本金（元）</label><input type="number" id="setWenwen" placeholder="0.00"></div>
-      <div class="field"><label>个人投资投入本金（元）</label><input type="number" id="setTouzi" placeholder="0.00"></div>
-      <button class="btn" id="setBtn">保存设置</button>
-    </div>
   </div>
 
   <!-- ===== 记支出页 ===== -->
@@ -197,8 +189,8 @@
       </div>
       <div class="t-right">
         <div class="label">资金模块</div>
-        <div class="income" id="assetCount">4 个</div>
-        <div class="ratio" id="assetNote">应急+稳健+投资+日常</div>
+        <div class="income" id="assetCount">3 个</div>
+        <div class="ratio" id="assetNote">手上可用+稳健+投资</div>
       </div>
     </div>
 
@@ -209,9 +201,6 @@
     <div class="pie-card">
       <div id="assetChart" style="width:100%;height:235px"></div>
     </div>
-
-    <div class="card-title">投资行情（真实净值·近30日）</div>
-    <div class="quote-grid" id="quoteGrid"></div>
   </div>
 
   <!-- ===== 投资页 ===== -->
@@ -394,7 +383,7 @@
     for (const m of data.modules) {
       grid.innerHTML += `
         <div class="mod">
-          <div class="m-name">${m.name}<span class="m-pct">${m.pct}%</span></div>
+          <div class="m-name">${m.name}<span class="m-pct">${m.ratio}%</span></div>
           <div class="m-plan">当前 <b>${m.current}</b></div>
           <div class="m-now">占比 ${m.ratio}%</div>
         </div>`;
@@ -415,56 +404,6 @@
         { type: "text", left: "center", top: "48%", style: { text: "总资产", fill: "#8a8a8a", fontSize: 12 } },
       ],
     });
-  }
-
-  // ===== 加载：投资行情（有资金→市值+盈亏；无资金→行情+推荐） =====
-  async function loadQuotes() {
-    const res = await fetch("/api/quotes");
-    const data = await res.json();
-    const grid = document.getElementById("quoteGrid");
-    grid.innerHTML = "";
-    for (const key of ["wenwen", "touzi"]) {
-      const q = data[key];
-      if (!q) continue;
-      if (q.error) {
-        grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div><div class="q-err">${q.error}</div></div>`;
-        continue;
-      }
-      const cls = q.change >= 0 ? "up" : "down";
-      const arrow = (q.change >= 0 ? "+" : "") + q.change;
-      let body = "";
-      if (q.principal > 0) {
-        const pcls = q.total_pnl >= 0 ? "up" : "down";
-        const dcls = q.day_pnl >= 0 ? "up" : "down";
-        const pArrow = (q.total_pnl >= 0 ? "+" : "") + q.total_pnl;
-        const dArrow = (q.day_pnl >= 0 ? "+" : "") + q.day_pnl;
-        body = `
-          <div class="q-mv">市值 <b>${q.market_value}</b> 元</div>
-          <div class="q-pnl">总盈亏 <i class="${pcls}">${pArrow}</i> · 单日 <i class="${dcls}">${dArrow}</i></div>
-          <div id="quote-${key}" style="width:100%;height:105px"></div>
-          <div class="q-err">更新 ${q.cached_at}</div>`;
-      } else {
-        body = `
-          <div class="q-latest">${q.latest}<i class="${cls}">${arrow}%</i></div>
-          <div class="q-rec">${q.change >= 0 ? "近期走高，可关注回调风险" : "近期回调，可分批布局"}</div>
-          <div id="quote-${key}" style="width:100%;height:105px"></div>
-          <div class="q-err">更新 ${q.cached_at}</div>`;
-      }
-      grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div>${body}</div>`;
-    }
-    for (const key of ["wenwen", "touzi"]) {
-      const q = data[key];
-      if (!q || q.error) continue;
-      const inst = echarts.init(document.getElementById("quote-" + key));
-      quoteInsts[key] = inst;
-      inst.setOption({
-        grid: { left: 42, right: 8, top: 10, bottom: 22 },
-        xAxis: { type: "category", data: q.dates, show: false },
-        yAxis: { type: "value", axisLabel: { color: "#aaa", fontSize: 10 }, splitLine: { lineStyle: { color: "#f0f0f0" } } },
-        series: [{ type: "line", data: q.values, smooth: true, symbol: "none",
-                   lineStyle: { color: key === "touzi" ? "#2f5d50" : "#a3c4bb", width: 2 } }],
-      });
-    }
   }
 
   // ===== 投资页：总览 + 走势 + 流水 + 分析 =====
@@ -543,35 +482,11 @@
     });
     document.getElementById("invAmount").value = "";
     loadInvest();
+    loadOverview();   // 投入/赎回 → 主页可用资金联动
+    loadAssets();     // 投入/赎回 → 总资产联动
   }
   document.getElementById("invAddBtn").onclick = () => doInvest("add");
   document.getElementById("invSubBtn").onclick = () => doInvest("remove");
-
-  // ===== 资金设置（期初资金 + 投入本金 → 激活盈亏） =====
-  async function loadSettings() {
-    const res = await fetch("/api/settings");
-    const data = await res.json();
-    document.getElementById("setInitial").value = data.initial;
-    document.getElementById("setWenwen").value = data.wenwen_principal;
-    document.getElementById("setTouzi").value = data.touzi_principal;
-  }
-  async function saveSettings() {
-    const body = {
-      initial: Number(document.getElementById("setInitial").value) || 0,
-      wenwen_principal: Number(document.getElementById("setWenwen").value) || 0,
-      touzi_principal: Number(document.getElementById("setTouzi").value) || 0,
-    };
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    await res.json();
-    loadOverview();
-    loadAssets();
-    loadQuotes();
-  }
-  document.getElementById("setBtn").onclick = saveSettings;
 
   // ===== 记收入 =====
   async function addIncome() {
@@ -615,8 +530,6 @@
   loadTrend();
   loadOverview();
   loadAssets();
-  loadQuotes();
-  loadSettings();
   loadInvest();
 </script>
 </body>
