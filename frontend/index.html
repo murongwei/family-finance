@@ -135,6 +135,17 @@
   .cat-item .del { padding:4px 9px; font-size:12px; }
   .cat-add { display:flex; gap:8px; margin-top:6px; }
   .cat-add input { flex:1; padding:10px 12px; font-size:14px; border:1px solid var(--line); border-radius:10px; background:#fafaf9; outline:none; }
+  .login-page { position:fixed; inset:0; background:#f6f6f4; display:flex; align-items:center; justify-content:center; z-index:100; }
+  .login-box { background:var(--card); border-radius:var(--radius); padding:28px 24px; width:84%; max-width:340px; box-shadow:0 8px 30px rgba(0,0,0,.12); }
+  .login-logo { font-size:20px; font-weight:800; color:var(--main); text-align:center; margin-bottom:18px; }
+  .login-box input { width:100%; padding:12px 14px; font-size:15px; border:1px solid var(--line); border-radius:12px; margin-bottom:10px; background:#fafaf9; outline:none; box-sizing:border-box; }
+  .login-box .btn { width:100%; margin-top:2px; }
+  .lg-msg { color:#c0392b; font-size:13px; min-height:18px; margin:2px 0 8px; text-align:center; }
+  .lg-switch { text-align:center; margin-top:12px; font-size:13px; color:var(--text2); }
+  .lg-switch a { color:var(--main); font-weight:600; cursor:pointer; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 2px 0; font-size:13px; color:var(--text2); }
+  .tb-user b { color:var(--main); font-size:14px; }
+  .tb-logout { border:1px solid var(--line); background:#fff; color:var(--text2); padding:6px 12px; border-radius:10px; font-size:12px; cursor:pointer; }
   .empty { text-align:center; color:var(--text2); font-size:14px; padding:28px 0; }
   .inv-actions { display:flex; gap:10px; }
   .inv-red { background:linear-gradient(180deg,#c97a63,#b05b4a); box-shadow:0 3px 8px rgba(176,91,74,.3), inset 0 1px 0 rgba(255,255,255,.2); }
@@ -161,9 +172,27 @@
 </style>
 </head>
 <body>
+<!-- 登录页（未登录时全屏遮罩，登录后隐藏） -->
+<div class="login-page" id="loginPage" style="display:flex">
+  <div class="login-box">
+    <div class="login-logo">家庭理财</div>
+    <input id="lgName" placeholder="账号">
+    <input id="lgPwd" type="password" placeholder="密码">
+    <div id="lgMsg" class="lg-msg"></div>
+    <button class="btn" onclick="doLogin()">登录</button>
+    <div class="lg-switch"><a onclick="showReg(true)">注册新账号</a></div>
+    <div id="lgReg" style="display:none">
+      <input id="lgPwd2" type="password" placeholder="确认密码">
+      <button class="btn" onclick="doRegister()">注册并登录</button>
+      <div class="lg-switch"><a onclick="showReg(false)">返回登录</a></div>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="app-title">家庭理财管家</div>
   <div class="app-sub">记一笔，看得清</div>
+  <div class="topbar"><span class="tb-user">当前：<b id="userName">--</b></span><button class="tb-logout" onclick="logout()">退出</button></div>
 
   <!-- 导航 -->
   <div class="nav">
@@ -325,6 +354,66 @@
 <script>
   let pieInst, trendInst, assetInst;   // ECharts 实例（切页后要 resize）
   let quoteInsts = {};   // 行情折线实例（总资产页）
+
+  // ===== 登录 / 注册 / 退出 =====
+  // 全局重写 fetch：自动带上当前登录 token（一次改动，全站请求生效）
+  const _rawFetch = window.fetch.bind(window);
+  window.fetch = function (url, opt) {
+    opt = opt || {};
+    opt.headers = Object.assign({}, opt.headers,
+      { "Authorization": "Bearer " + (localStorage.getItem("ff_token") || "") });
+    return _rawFetch(url, opt);
+  };
+
+  function showLogin() { document.getElementById("loginPage").style.display = "flex"; }
+  function hideLogin() { document.getElementById("loginPage").style.display = "none"; }
+  function showReg(show) { document.getElementById("lgReg").style.display = show ? "block" : "none"; }
+
+  async function doLogin() {
+    const name = document.getElementById("lgName").value.trim();
+    const pwd = document.getElementById("lgPwd").value;
+    const r = await (await fetch("/api/login", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, password: pwd }) })).json();
+    if (r.ok) {
+      localStorage.setItem("ff_token", r.token);
+      localStorage.setItem("ff_name", r.name);
+      document.getElementById("userName").textContent = r.name;
+      hideLogin(); loadAll();
+    } else {
+      document.getElementById("lgMsg").textContent = r.msg;
+    }
+  }
+
+  async function doRegister() {
+    const name = document.getElementById("lgName").value.trim();
+    const pwd = document.getElementById("lgPwd").value;
+    const pwd2 = document.getElementById("lgPwd2").value;
+    if (pwd !== pwd2) { document.getElementById("lgMsg").textContent = "两次密码不一致"; return; }
+    if (pwd.length < 4) { document.getElementById("lgMsg").textContent = "密码至少 4 位"; return; }
+    const r = await (await fetch("/api/register", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, password: pwd }) })).json();
+    if (r.ok) {
+      localStorage.setItem("ff_token", r.token);
+      localStorage.setItem("ff_name", r.name);
+      document.getElementById("userName").textContent = r.name;
+      hideLogin(); loadAll();
+    } else {
+      document.getElementById("lgMsg").textContent = r.msg;
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem("ff_token");
+    localStorage.removeItem("ff_name");
+    showLogin();
+  }
+
+  function loadAll() {
+    loadLedger(); loadSummary(); loadTrend(); loadOverview();
+    loadAssets(); loadInvest(); loadCategories(); loadBudget();
+  }
 
   // ===== 导航切换 =====
   function showPage(name) {
@@ -696,15 +785,14 @@
   }
   document.getElementById("expBtn").onclick = addExpense;
 
-  // 首次加载
-  loadLedger();
-  loadSummary();
-  loadTrend();
-  loadOverview();
-  loadAssets();
-  loadInvest();
-  loadCategories();
-  loadBudget();
+  // 首次加载：有 token 直接进主界面并加载数据，否则显示登录页
+  if (localStorage.getItem("ff_token")) {
+    document.getElementById("userName").textContent = localStorage.getItem("ff_name") || "";
+    hideLogin();
+    loadAll();
+  } else {
+    showLogin();
+  }
 </script>
 </body>
 </html>

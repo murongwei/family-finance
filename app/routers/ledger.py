@@ -3,11 +3,56 @@ import json
 import time as _time
 import io
 import csv
-from fastapi import APIRouter, Response
+import hashlib
+import secrets
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
-from ..database import get_conn
+from ..database import get_conn, _hash_pwd
 
 router = APIRouter(prefix="/api")
+
+
+class LoginRec(BaseModel):
+    """登录/注册：账号 + 密码"""
+    name: str
+    password: str
+
+
+def _uid(request):
+    """从 Authorization: Bearer <token> 解析当前用户 id；未登录返回 0"""
+    auth = request.headers.get("authorization", "")
+    token = auth.replace("Bearer ", "").strip()
+    if not token:
+        return 0
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM users WHERE token=?", (token,)).fetchone()
+    return row["id"] if row else 0
+
+
+@router.post("/login")
+def login(rec: LoginRec):
+    """账号密码登录 → 发 token（前端存 localStorage，之后请求带它）"""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE name=?", (rec.name,)).fetchone()
+        if not row or _hash_pwd(rec.password, row["salt"]) != row["pwdhash"]:
+            return {"ok": False, "msg": "账号或密码不对"}
+        token = secrets.token_hex(16)
+        conn.execute("UPDATE users SET token=? WHERE id=?", (token, row["id"]))
+    return {"ok": True, "token": token, "name": rec.name, "id": row["id"]}
+
+
+@router.post("/register")
+def register(rec: LoginRec):
+    """家人各自注册新账号（局域网内自用）"""
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE name=?", (rec.name,)).fetchone():
+            return {"ok": False, "msg": "账号已存在"}
+        salt = secrets.token_hex(8)
+        cur = conn.execute("INSERT INTO users(name, salt, pwdhash) VALUES(?,?,?)",
+                           (rec.name, salt, _hash_pwd(rec.password, salt)))
+        token = secrets.token_hex(16)
+        conn.execute("UPDATE users SET token=? WHERE id=?", (token, cur.lastrowid))
+    return {"ok": True, "token": token, "name": rec.name, "id": cur.lastrowid}
 
 
 class Entry(BaseModel):
@@ -20,12 +65,13 @@ class Entry(BaseModel):
 
 
 @router.post("/entries")
-def create_entry(entry: Entry):
-    """新增一条账目（支出或收入）"""
+def create_entry(entry: Entry, request: Request):
+    """新增一条账目（支出或收入），记在当前登录用户名下"""
+    uid = _uid(request)
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO ledger (date, category, amount, note, type) VALUES (?, ?, ?, ?, ?)",
-            (entry.date, entry.category, entry.amount, entry.note, entry.type),
+            "INSERT INTO ledger (date, category, amount, note, type, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (entry.date, entry.category, entry.amount, entry.note, entry.type, uid),
         )
         last_id = cur.lastrowid
     return {
@@ -39,37 +85,42 @@ def create_entry(entry: Entry):
 
 
 @router.get("/entries")
-def list_entries():
-    """查询全部账目（按日期倒序）"""
+def list_entries(request: Request):
+    """查询当前用户全部账目（按日期倒序）"""
+    uid = _uid(request)
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM ledger ORDER BY date DESC").fetchall()
+        rows = conn.execute("SELECT * FROM ledger WHERE user_id=? ORDER BY date DESC", (uid,)).fetchall()
     return [dict(r) for r in rows]
 
 
 @router.delete("/entries/{entry_id}")
-def delete_entry(entry_id: int):
-    """删除一条账目"""
+def delete_entry(entry_id: int, request: Request):
+    """删除当前用户的一条账目"""
+    uid = _uid(request)
     with get_conn() as conn:
-        conn.execute("DELETE FROM ledger WHERE id=?", (entry_id,))
+        conn.execute("DELETE FROM ledger WHERE id=? AND user_id=?", (entry_id, uid))
     return {"ok": True}
 
 
 @router.put("/entries/{entry_id}")
-def update_entry(entry_id: int, entry: Entry):
-    """修改一条账目（金额记错/分类改）"""
+def update_entry(entry_id: int, entry: Entry, request: Request):
+    """修改当前用户的一条账目（金额记错/分类改）"""
+    uid = _uid(request)
     with get_conn() as conn:
         conn.execute(
-            "UPDATE ledger SET date=?, category=?, amount=?, note=?, type=? WHERE id=?",
-            (entry.date, entry.category, entry.amount, entry.note, entry.type, entry_id),
+            "UPDATE ledger SET date=?, category=?, amount=?, note=?, type=? WHERE id=? AND user_id=?",
+            (entry.date, entry.category, entry.amount, entry.note, entry.type, entry_id, uid),
         )
     return {"ok": True, "id": entry_id}
 
 
 @router.get("/export")
-def export_csv():
-    """导出全部账目为 CSV（UTF-8 + BOM，Excel 打开中文不乱码）"""
+def export_csv(request: Request):
+    """导出当前用户全部账目为 CSV（UTF-8 + BOM，Excel 打开中文不乱码）"""
+    uid = _uid(request)
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM ledger ORDER BY date DESC, id DESC").fetchall()
+        rows = conn.execute("SELECT * FROM ledger WHERE user_id=? ORDER BY date DESC, id DESC",
+                            (uid,)).fetchall()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["id", "date", "category", "amount", "note", "type"])
@@ -84,38 +135,39 @@ def export_csv():
 
 
 @router.get("/summary")
-def summary():
-    """本月支出按分类统计：每类金额 + 总计（喂给饼图，只统计支出）"""
+def summary(request: Request):
+    """当前用户本月支出按分类统计：每类金额 + 总计（喂给饼图，只统计支出）"""
+    uid = _uid(request)
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT category, SUM(amount) AS total FROM ledger "
-            "WHERE type='expense' GROUP BY category ORDER BY total DESC"
-        ).fetchall()
+            "WHERE user_id=? AND type='expense' GROUP BY category ORDER BY total DESC",
+            (uid,)).fetchall()
     data = [{"category": r["category"], "amount": r["total"]} for r in rows]
     total = sum(r["total"] for r in rows)
     return {"categories": data, "total": total}
 
 
 @router.get("/overview")
-def overview():
-    """资金概览：可用资金 = 收入−支出−净投资投入(投入转去理财/赎回转回)；模块余额真实化"""
+def overview(request: Request):
+    """当前用户资金概览：可用资金 = 收入−支出−净投资投入(投入转去理财/赎回转回)；模块余额真实化"""
+    uid = _uid(request)
     with get_conn() as conn:
         inc = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE user_id=? AND type='income'",
+            (uid,)).fetchone()[0]
         exp = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='expense'"
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE user_id=? AND type='expense'",
+            (uid,)).fetchone()[0]
         net_invest = conn.execute(
             "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
-            "FROM invest_records"
-        ).fetchone()[0]
-        w = round(_get_principal(conn, "wenwen"), 2)
-        t = round(_get_principal(conn, "touzi"), 2)
-        e_pct = int(_get_setting(conn, "budget_emergency", "30"))
-        w_pct = int(_get_setting(conn, "budget_wenwen", "30"))
-        t_pct = int(_get_setting(conn, "budget_touzi", "30"))
-        d_pct = int(_get_setting(conn, "budget_daily", "10"))
+            "FROM invest_records WHERE user_id=?", (uid,)).fetchone()[0]
+        w = round(_get_principal(conn, uid, "wenwen"), 2)
+        t = round(_get_principal(conn, uid, "touzi"), 2)
+        e_pct = int(_get_setting(conn, uid, "budget_emergency", "30"))
+        w_pct = int(_get_setting(conn, uid, "budget_wenwen", "30"))
+        t_pct = int(_get_setting(conn, uid, "budget_touzi", "30"))
+        d_pct = int(_get_setting(conn, uid, "budget_daily", "10"))
     available = round(inc - exp - net_invest, 2)   # 手上可用 = 收入 − 支出 − 投进理财的钱 + 赎回
     modules = [
         {"name": "应急救命", "pct": e_pct, "current": 0},   # 应急/日常的钱在手边(可用资金里)
@@ -129,22 +181,22 @@ def overview():
 
 
 @router.get("/assets")
-def assets():
-    """总资产页 = 手上可用 + 稳健理财本金 + 个人投资本金（投资盈亏见投资页市值）"""
+def assets(request: Request):
+    """当前用户总资产页 = 手上可用 + 稳健理财本金 + 个人投资本金（投资盈亏见投资页市值）"""
+    uid = _uid(request)
     with get_conn() as conn:
         inc = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE user_id=? AND type='income'",
+            (uid,)).fetchone()[0]
         exp = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='expense'"
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE user_id=? AND type='expense'",
+            (uid,)).fetchone()[0]
         net_invest = conn.execute(
             "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
-            "FROM invest_records"
-        ).fetchone()[0]
+            "FROM invest_records WHERE user_id=?", (uid,)).fetchone()[0]
         avail = round(inc - exp - net_invest, 2)
-        w = round(_get_principal(conn, "wenwen"), 2)
-        t = round(_get_principal(conn, "touzi"), 2)
+        w = round(_get_principal(conn, uid, "wenwen"), 2)
+        t = round(_get_principal(conn, uid, "touzi"), 2)
     modules = [
         {"name": "手上可用", "current": avail},
         {"name": "稳健理财", "current": w},
@@ -157,13 +209,14 @@ def assets():
 
 
 @router.get("/trend")
-def trend():
-    """近7天支出趋势：按日期聚合每日支出（喂折线图，从早到晚）"""
+def trend(request: Request):
+    """当前用户近7天支出趋势：按日期聚合每日支出（喂折线图，从早到晚）"""
+    uid = _uid(request)
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT date, SUM(amount) AS total FROM ledger "
-            "WHERE type='expense' GROUP BY date ORDER BY date DESC LIMIT 7"
-        ).fetchall()
+            "WHERE user_id=? AND type='expense' GROUP BY date ORDER BY date DESC LIMIT 7",
+            (uid,)).fetchall()
     rows = rows[::-1]   # 升序：早 → 晚
     return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
 
@@ -189,23 +242,24 @@ def _fetch_quote(sym):
         return None
 
 
-def _get_setting(conn, key, default="0"):
-    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+def _get_setting(conn, uid, key, default="0"):
+    row = conn.execute("SELECT value FROM settings WHERE user_id=? AND key=?", (uid, key)).fetchone()
     return row["value"] if row else default
 
 
-def _get_principal(conn, key):
-    """该模块累计本金 = 投入(SUM add) − 赎回(SUM remove)"""
+def _get_principal(conn, uid, key):
+    """该模块累计本金 = 投入(SUM add) − 赎回(SUM remove)，按用户"""
     row = conn.execute(
         "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
-        "FROM invest_records WHERE module=?", (key,)).fetchone()
+        "FROM invest_records WHERE user_id=? AND module=?", (uid, key)).fetchone()
     return row[0]
 
 
 @router.get("/quotes")
-def quotes():
+def quotes(request: Request):
     """投资行情：先读本地缓存(5分钟内)，过期才拉 akshare 刷新；断网时返回最近缓存。
-    按投入本金算市值/总盈亏/单日盈亏（本金=0 则前端纯展示行情+推荐）"""
+    按当前用户投入本金算市值/总盈亏/单日盈亏（本金=0 则前端纯展示行情+推荐）"""
+    uid = _uid(request)
     now = _time.time()
     result = {}
     with get_conn() as conn:
@@ -221,7 +275,7 @@ def quotes():
                         "INSERT OR REPLACE INTO quotes_cache(key, data, updated_at) VALUES(?,?,?)",
                         (key, json.dumps(fresh), now))
 
-            principal = _get_principal(conn, key)   # 该模块投入本金（流水累计）
+            principal = _get_principal(conn, uid, key)   # 当前用户该模块投入本金（流水累计）
             if data is None:
                 result[key] = {"name": name, "principal": principal, "error": "暂无行情（请检查网络）"}
             else:
@@ -242,23 +296,26 @@ class InvestRec(BaseModel):
 
 
 @router.post("/invest")
-def add_invest(rec: InvestRec):
-    """记录一笔投入/赎回（累计本金由流水自动计算）"""
+def add_invest(rec: InvestRec, request: Request):
+    """记录当前用户一笔投入/赎回（累计本金由流水自动计算）"""
+    uid = _uid(request)
     today = _time.strftime("%Y-%m-%d")
     with get_conn() as conn:
-        conn.execute("INSERT INTO invest_records(date, module, action, amount) VALUES(?,?,?,?)",
-                     (today, rec.module, rec.action, rec.amount))
+        conn.execute("INSERT INTO invest_records(date, module, action, amount, user_id) VALUES(?,?,?,?,?)",
+                     (today, rec.module, rec.action, rec.amount, uid))
     return {"ok": True}
 
 
 @router.get("/invest")
-def invest():
-    """投资总览：各模块累计本金 + 全部流水"""
+def invest(request: Request):
+    """当前用户投资总览：各模块累计本金 + 全部流水"""
+    uid = _uid(request)
     with get_conn() as conn:
-        records = conn.execute("SELECT * FROM invest_records ORDER BY date DESC, id DESC").fetchall()
+        records = conn.execute("SELECT * FROM invest_records WHERE user_id=? ORDER BY date DESC, id DESC",
+                               (uid,)).fetchall()
         modules = {}
         for key, _sym, name in QUOTES_TARGETS:
-            modules[key] = {"name": name, "principal": round(_get_principal(conn, key), 2)}
+            modules[key] = {"name": name, "principal": round(_get_principal(conn, uid, key), 2)}
     return {"modules": modules, "records": [dict(r) for r in records]}
 
 
@@ -269,10 +326,12 @@ class CatRec(BaseModel):
 
 
 @router.get("/categories")
-def categories():
-    """全部分类：内置(builtin=1) + 自定义；按 支出/收入 分组"""
+def categories(request: Request):
+    """当前用户可用分类：内置(builtin=1 全局) + 本人自定义；按 支出/收入 分组"""
+    uid = _uid(request)
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM categories ORDER BY builtin DESC, id ASC").fetchall()
+        rows = conn.execute("SELECT * FROM categories WHERE user_id=? OR builtin=1 ORDER BY builtin DESC, id ASC",
+                            (uid,)).fetchall()
     result = {"expense": [], "income": []}
     for r in rows:
         result[r["type"]].append({"id": r["id"], "name": r["name"], "builtin": r["builtin"]})
@@ -280,26 +339,30 @@ def categories():
 
 
 @router.post("/categories")
-def add_category(rec: CatRec):
-    """加一个自定义分类（同名同类型去重）"""
+def add_category(rec: CatRec, request: Request):
+    """当前用户加一个自定义分类（同名同类型全表去重）"""
+    uid = _uid(request)
     with get_conn() as conn:
         if conn.execute("SELECT 1 FROM categories WHERE name=? AND type=?",
                         (rec.name, rec.type)).fetchone():
             return {"ok": False, "msg": "分类已存在"}
-        cur = conn.execute("INSERT INTO categories(name, type, builtin) VALUES(?,?,0)",
-                           (rec.name, rec.type))
+        cur = conn.execute("INSERT INTO categories(name, type, builtin, user_id) VALUES(?,?,0,?)",
+                           (rec.name, rec.type, uid))
     return {"ok": True, "id": cur.lastrowid}
 
 
 @router.delete("/categories/{cat_id}")
-def delete_category(cat_id: int):
-    """删一个自定义分类（内置不可删）"""
+def delete_category(cat_id: int, request: Request):
+    """删一个自定义分类（内置不可删，只能删自己加的）"""
+    uid = _uid(request)
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
         if not row:
             return {"ok": False, "msg": "分类不存在"}
         if row["builtin"]:
             return {"ok": False, "msg": "内置分类不可删"}
+        if row["user_id"] != uid:
+            return {"ok": False, "msg": "只能删自己加的分类"}
         conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
     return {"ok": True}
 
@@ -313,22 +376,24 @@ class BudgetRec(BaseModel):
 
 
 @router.get("/budget")
-def budget():
-    """读取预算分配比例"""
+def budget(request: Request):
+    """读取当前用户的预算分配比例"""
+    uid = _uid(request)
     with get_conn() as conn:
         return {
-            "emergency": int(_get_setting(conn, "budget_emergency", "30")),
-            "wenwen": int(_get_setting(conn, "budget_wenwen", "30")),
-            "touzi": int(_get_setting(conn, "budget_touzi", "30")),
-            "daily": int(_get_setting(conn, "budget_daily", "10")),
+            "emergency": int(_get_setting(conn, uid, "budget_emergency", "30")),
+            "wenwen": int(_get_setting(conn, uid, "budget_wenwen", "30")),
+            "touzi": int(_get_setting(conn, uid, "budget_touzi", "30")),
+            "daily": int(_get_setting(conn, uid, "budget_daily", "10")),
         }
 
 
 @router.put("/budget")
-def update_budget(rec: BudgetRec):
-    """保存预算分配比例（存 settings 表）"""
+def update_budget(rec: BudgetRec, request: Request):
+    """保存当前用户的预算分配比例（存 settings 表，按用户）"""
+    uid = _uid(request)
     with get_conn() as conn:
         for key, val in [("budget_emergency", rec.emergency), ("budget_wenwen", rec.wenwen),
                          ("budget_touzi", rec.touzi), ("budget_daily", rec.daily)]:
-            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, str(val)))
+            conn.execute("INSERT OR REPLACE INTO settings(user_id,key,value) VALUES(?,?,?)", (uid, key, str(val)))
     return {"ok": True}
