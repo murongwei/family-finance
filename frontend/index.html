@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>家庭理财管家</title>
+<style>
+  /* ===== 最终版：墨绿暖白 · 大圆角 · 立体按钮 · hover 交互 ===== */
+  :root {
+    --bg:#f6f6f4; --card:#fff; --accent:#2f5d50;
+    --accent2:#4a8576; --accent3:#a3c4bb; --accent4:#d9e8e4;
+    --text:#2b2b2b; --text2:#8a8a8a; --line:#eee;
+    --radius:20px; --radius-s:12px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg);
+         color:var(--text); line-height:1.6; padding:24px 16px 48px; }
+  .wrap { max-width:600px; margin:0 auto; }
+  .app-title { font-size:22px; font-weight:700; letter-spacing:1px; margin-bottom:4px; }
+  .app-sub { font-size:13px; color:var(--text2); margin-bottom:24px; }
+
+  /* 可用资金 + 收入占比 */
+  .total { background:var(--card); border-radius:var(--radius); padding:22px; margin-bottom:20px;
+           box-shadow:0 2px 10px rgba(0,0,0,.05); display:flex; align-items:center; }
+  .t-left { flex:1; }
+  .t-left .label, .t-right .label { font-size:13px; color:var(--text2); }
+  .t-left .num { font-size:34px; font-weight:700; margin-top:4px; }
+  .t-left .num span { font-size:16px; color:var(--text2); font-weight:500; }
+  .t-right { text-align:right; border-left:1px solid var(--line); padding-left:18px; }
+  .t-right .income { font-size:24px; font-weight:700; color:var(--accent); margin-top:4px; }
+  .t-right .ratio { font-size:12px; color:var(--text2); margin-top:2px; }
+
+  /* 4 资金模块：应分配 + 当前 */
+  .modules { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+  .mod { background:var(--card); border-radius:var(--radius); padding:16px 18px;
+         box-shadow:0 2px 10px rgba(0,0,0,.05); transition:transform .15s ease, box-shadow .15s ease; }
+  .mod:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.08); }
+  .m-name { font-size:14px; font-weight:600; }
+  .m-name .m-pct { font-size:12px; color:var(--text2); font-weight:500; margin-left:6px; }
+  .m-plan { font-size:13px; color:var(--text2); margin-top:10px; }
+  .m-plan b, .m-now b { color:var(--text); font-size:16px; }
+  .m-now { font-size:13px; color:var(--text2); margin-top:2px; }
+
+  .card-title { font-size:15px; font-weight:700; margin:26px 0 12px; }
+  .pie-card { background:var(--card); border-radius:var(--radius); padding:20px;
+              box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .pie-row { display:flex; align-items:center; gap:20px; }
+  .pie-legend { flex:1; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; }
+  .legend-item .dot { width:10px; height:10px; border-radius:3px; }
+  .legend-item .amt { margin-left:auto; color:var(--text2); }
+
+  /* 记账表单 */
+  .form-card { background:var(--card); border-radius:var(--radius); padding:20px;
+               box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:13px; color:var(--text2); margin-bottom:6px; }
+  .field input, .field select { width:100%; padding:12px 14px; font-size:15px;
+        border:1px solid var(--line); border-radius:var(--radius-s); background:#fafaf9; outline:none;
+        transition:border-color .15s ease, background .15s ease; }
+  .field input:focus { border-color:var(--accent); background:#fff; }
+
+  /* 立体按钮 + hover 变大 */
+  .btn { width:100%; padding:14px; font-size:15px; font-weight:600; color:#fff; border:none;
+         border-radius:var(--radius-s); cursor:pointer; margin-top:4px;
+         background:linear-gradient(180deg,#3a6e5f,#2f5d50);
+         box-shadow:0 3px 8px rgba(47,93,80,.28), inset 0 1px 0 rgba(255,255,255,.22);
+         transition:transform .15s ease, box-shadow .15s ease, filter .15s ease; }
+  .btn:hover { transform:scale(1.04); box-shadow:0 6px 14px rgba(47,93,80,.32), inset 0 1px 0 rgba(255,255,255,.22); }
+  .btn:active { transform:scale(.98); box-shadow:0 2px 5px rgba(47,93,80,.25), inset 0 1px 0 rgba(255,255,255,.22); }
+
+  /* 最近账目 */
+  .ledger { background:var(--card); border-radius:var(--radius); padding:6px 20px;
+            box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .entry { display:flex; align-items:center; padding:13px 0; border-bottom:1px solid var(--line); }
+  .entry:last-child { border-bottom:none; }
+  .entry .e-cat { width:38px; height:38px; border-radius:var(--radius-s); background:#eef4f2; color:var(--accent);
+        display:flex; align-items:center; justify-content:center; font-size:16px; margin-right:12px; }
+  .entry .e-info { flex:1; }
+  .entry .e-name { font-size:14px; font-weight:600; }
+  .entry .e-note { font-size:12px; color:var(--text2); }
+  .entry .e-amt { font-size:16px; font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="app-title">家庭理财管家</div>
+  <div class="app-sub">记一笔，看得清</div>
+
+  <!-- 可用资金 + 收入占比 -->
+  <div class="total">
+    <div class="t-left">
+      <div class="label">本月可用</div>
+      <div class="num">6,400<span> 元</span></div>
+    </div>
+    <div class="t-right">
+      <div class="label">本月收入</div>
+      <div class="income">+3,000</div>
+      <div class="ratio">占可用 47%</div>
+    </div>
+  </div>
+
+  <!-- 4 资金模块：应分配 + 当前 -->
+  <div class="modules">
+    <div class="mod">
+      <div class="m-name">应急救命<span class="m-pct">30%</span></div>
+      <div class="m-plan">应分配 <b>1,920</b></div>
+      <div class="m-now">当前 <b>2,000</b></div>
+    </div>
+    <div class="mod">
+      <div class="m-name">稳健理财<span class="m-pct">30%</span></div>
+      <div class="m-plan">应分配 <b>1,920</b></div>
+      <div class="m-now">当前 <b>1,900</b></div>
+    </div>
+    <div class="mod">
+      <div class="m-name">个人投资<span class="m-pct">30%</span></div>
+      <div class="m-plan">应分配 <b>1,920</b></div>
+      <div class="m-now">当前 <b>1,800</b></div>
+    </div>
+    <div class="mod">
+      <div class="m-name">日常娱乐<span class="m-pct">10%</span></div>
+      <div class="m-plan">应分配 <b>640</b></div>
+      <div class="m-now">当前 <b>700</b></div>
+    </div>
+  </div>
+
+  <!-- 支出分布 -->
+  <div class="card-title">本月支出分布</div>
+  <div class="pie-card">
+    <div class="pie-row">
+      <svg width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0">
+        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#2f5d50" stroke-width="7" stroke-dasharray="18 100"/>
+        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#4a8576" stroke-width="7" stroke-dasharray="12 100" stroke-dashoffset="-20"/>
+        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#a3c4bb" stroke-width="7" stroke-dasharray="8 100" stroke-dashoffset="-35"/>
+        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#d9e8e4" stroke-width="7" stroke-dasharray="6 100" stroke-dashoffset="-45"/>
+        <text x="21" y="23" text-anchor="middle" font-size="5" fill="#2b2b2b" font-weight="700">1,240</text>
+        <text x="21" y="28" text-anchor="middle" font-size="3" fill="#8a8a8a">本月支出</text>
+      </svg>
+      <div class="pie-legend">
+        <div class="legend-item"><span class="dot" style="background:#2f5d50"></span>饮食<span class="amt">430</span></div>
+        <div class="legend-item"><span class="dot" style="background:#4a8576"></span>住房<span class="amt">300</span></div>
+        <div class="legend-item"><span class="dot" style="background:#a3c4bb"></span>交通<span class="amt">210</span></div>
+        <div class="legend-item"><span class="dot" style="background:#d9e8e4"></span>其他<span class="amt">300</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 记一笔（后续独立成页） -->
+  <div class="card-title">记一笔</div>
+  <div class="form-card">
+    <div class="field"><label>金额（元）</label><input type="number" placeholder="0.00"></div>
+    <div class="field"><label>分类</label>
+      <select><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
+    </div>
+    <div class="field"><label>备注</label><input type="text" placeholder="选填，一句话"></div>
+    <button class="btn">记下来</button>
+  </div>
+
+  <!-- 最近账目（后续独立成页） -->
+  <div class="card-title">最近账目</div>
+  <div class="ledger">
+    <div class="entry"><div class="e-cat">餐</div><div class="e-info"><div class="e-name">饮食</div><div class="e-note">11-04 · 午餐</div></div><div class="e-amt">30</div></div>
+    <div class="entry"><div class="e-cat">行</div><div class="e-info"><div class="e-name">交通</div><div class="e-note">11-03 · 地铁</div></div><div class="e-amt">12</div></div>
+  </div>
+</div>
+</body>
+</html>
