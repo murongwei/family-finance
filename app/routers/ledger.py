@@ -1,7 +1,9 @@
 """记账 API —— 家庭极简理财管家 P1"""
 import json
 import time as _time
-from fastapi import APIRouter
+import io
+import csv
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 from ..database import get_conn
 
@@ -50,6 +52,35 @@ def delete_entry(entry_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM ledger WHERE id=?", (entry_id,))
     return {"ok": True}
+
+
+@router.put("/entries/{entry_id}")
+def update_entry(entry_id: int, entry: Entry):
+    """修改一条账目（金额记错/分类改）"""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE ledger SET date=?, category=?, amount=?, note=?, type=? WHERE id=?",
+            (entry.date, entry.category, entry.amount, entry.note, entry.type, entry_id),
+        )
+    return {"ok": True, "id": entry_id}
+
+
+@router.get("/export")
+def export_csv():
+    """导出全部账目为 CSV（UTF-8 + BOM，Excel 打开中文不乱码）"""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM ledger ORDER BY date DESC, id DESC").fetchall()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id", "date", "category", "amount", "note", "type"])
+    for r in rows:
+        w.writerow([r["id"], r["date"], r["category"], r["amount"], r["note"], r["type"]])
+    content = "\ufeff" + buf.getvalue()   # BOM：让 Excel/记事本正确识别 UTF-8
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="ledger_export.csv"'},
+    )
 
 
 @router.get("/summary")

@@ -109,6 +109,21 @@
   .entry .del { border:none; background:#fbeae6; color:#c05b4a; font-size:12px; padding:6px 10px;
         border-radius:8px; cursor:pointer; margin-left:10px; }
   .entry .del:hover { background:#f5d9d3; }
+  .entry .edit { border:none; background:#e8f0ed; color:var(--accent); font-size:12px; padding:6px 10px;
+        border-radius:8px; cursor:pointer; margin-left:6px; }
+  .entry .edit:hover { background:#d7e5e1; }
+  .e-edit { display:flex; flex-wrap:wrap; gap:8px; padding:10px 0; width:100%; align-items:center; }
+  .e-edit input, .e-edit select { padding:8px 10px; font-size:13px; border:1px solid var(--line); border-radius:8px; background:#fafaf9; outline:none; }
+  .e-edit input { flex:1; min-width:70px; }
+  .e-edit .save, .e-edit .cancel { padding:8px 14px; border:none; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; }
+  .e-edit .save { background:linear-gradient(180deg,#3a6e5f,#2f5d50); color:#fff; }
+  .e-edit .cancel { background:#eef1ef; color:var(--text2); }
+  .mini-btn { padding:8px 14px; font-size:13px; font-weight:600; color:#fff; border:none; border-radius:10px;
+        cursor:pointer; background:linear-gradient(180deg,#3a6e5f,#2f5d50);
+        box-shadow:0 2px 6px rgba(47,93,80,.25), inset 0 1px 0 rgba(255,255,255,.2);
+        transition:transform .15s ease, box-shadow .15s ease; }
+  .mini-btn:hover { transform:scale(1.04); box-shadow:0 4px 10px rgba(47,93,80,.3), inset 0 1px 0 rgba(255,255,255,.2); }
+  .card-title-row { display:flex; justify-content:space-between; align-items:center; }
   .empty { text-align:center; color:var(--text2); font-size:14px; padding:28px 0; }
   .inv-actions { display:flex; gap:10px; }
   .inv-red { background:linear-gradient(180deg,#c97a63,#b05b4a); box-shadow:0 3px 8px rgba(176,91,74,.3), inset 0 1px 0 rgba(255,255,255,.2); }
@@ -256,7 +271,9 @@
 
   <!-- ===== 最近账目页 ===== -->
   <div class="page" id="page-ledger">
-    <div class="card-title">最近账目</div>
+    <div class="card-title card-title-row">最近账目
+      <button class="mini-btn" onclick="exportCsv()">导出 CSV</button>
+    </div>
     <div class="month-bar">
       <button id="mth0" class="active" onclick="setMonth(0)">本月</button>
       <button id="mth-1" onclick="setMonth(-1)">上月</button>
@@ -307,19 +324,63 @@
     const list = document.getElementById("ledgerList");
     list.innerHTML = "";
     for (const item of items) {
-      const tag = item.type === "income" ? "收" : "支";
-      list.innerHTML += `
-        <div class="entry">
-          <div class="e-cat">${item.category[0]}</div>
-          <div class="e-info">
-            <div class="e-name">${tag}·${item.category}</div>
-            <div class="e-note">${item.date} · ${item.note || ""}</div>
-          </div>
-          <div class="e-amt">${tag === "收" ? "+" : ""}${item.amount}</div>
-          <button class="del" onclick="deleteEntry(${item.id})">删除</button>
-        </div>`;
+      if (editingId === item.id) {
+        const sel = item.type === "income"
+          ? `<select id="edType"><option value="expense">支出</option><option value="income" selected>收入</option></select>`
+          : `<select id="edType"><option value="expense" selected>支出</option><option value="income">收入</option></select>`;
+        list.innerHTML += `
+          <div class="entry">
+            <div class="e-edit">
+              <input id="edDate" value="${item.date}">
+              <input id="edCat" value="${item.category}">
+              <input id="edAmt" type="number" value="${item.amount}">
+              <input id="edNote" value="${item.note || ""}" placeholder="备注">
+              ${sel}
+              <button class="save" onclick="saveEdit(${item.id})">保存</button>
+              <button class="cancel" onclick="cancelEdit()">取消</button>
+            </div>
+          </div>`;
+      } else {
+        const tag = item.type === "income" ? "收" : "支";
+        list.innerHTML += `
+          <div class="entry">
+            <div class="e-cat">${item.category[0]}</div>
+            <div class="e-info">
+              <div class="e-name">${tag}·${item.category}</div>
+              <div class="e-note">${item.date} · ${item.note || ""}</div>
+            </div>
+            <div class="e-amt">${tag === "收" ? "+" : ""}${item.amount}</div>
+            <button class="edit" onclick="editEntry(${item.id})">编辑</button>
+            <button class="del" onclick="deleteEntry(${item.id})">删除</button>
+          </div>`;
+      }
     }
     if (!items.length) list.innerHTML = `<div class="empty">本月暂无账目</div>`;
+  }
+  let editingId = null;   // 正在编辑的账目 id
+  function editEntry(id) { editingId = id; renderLedger(); }
+  function cancelEdit() { editingId = null; renderLedger(); }
+  async function saveEdit(id) {
+    const body = {
+      date: document.getElementById("edDate").value,
+      category: document.getElementById("edCat").value,
+      amount: parseFloat(document.getElementById("edAmt").value),
+      note: document.getElementById("edNote").value,
+      type: document.getElementById("edType").value,
+    };
+    await fetch("/api/entries/" + id, { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    editingId = null;
+    loadLedger(); loadSummary(); loadOverview(); loadTrend(); loadAssets();
+  }
+  async function exportCsv() {
+    const resp = await fetch("/api/export");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "账目备份.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
   }
   async function deleteEntry(id) {
     await fetch("/api/entries/" + id, { method: "DELETE" });
