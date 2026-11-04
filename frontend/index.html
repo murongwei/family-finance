@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>家庭理财管家</title>
 <style>
-  /* ===== 墨绿暖白 · 大圆角 · 立体按钮 · hover · 三页导航 ===== */
+  /* ===== 墨绿暖白 · 大圆角 · 立体按钮 · 三页导航 · ECharts 看板 ===== */
   :root {
     --bg:#f6f6f4; --card:#fff; --accent:#2f5d50;
     --accent2:#4a8576; --accent3:#a3c4bb; --accent4:#d9e8e4;
@@ -28,11 +28,9 @@
   .nav button.active { background:linear-gradient(180deg,#3a6e5f,#2f5d50); color:#fff;
         box-shadow:0 3px 8px rgba(47,93,80,.28), inset 0 1px 0 rgba(255,255,255,.22); }
 
-  /* 页面区块：默认隐藏，点导航才显示 */
   .page { display:none; }
   .page.active { display:block; }
 
-  /* 可用资金 + 收入占比 */
   .total { background:var(--card); border-radius:var(--radius); padding:22px; margin-bottom:20px;
            box-shadow:0 2px 10px rgba(0,0,0,.05); display:flex; align-items:center; }
   .t-left { flex:1; }
@@ -43,7 +41,6 @@
   .t-right .income { font-size:24px; font-weight:700; color:var(--accent); margin-top:4px; }
   .t-right .ratio { font-size:12px; color:var(--text2); margin-top:2px; }
 
-  /* 4 资金模块 */
   .modules { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
   .mod { background:var(--card); border-radius:var(--radius); padding:16px 18px;
          box-shadow:0 2px 10px rgba(0,0,0,.05); transition:transform .15s ease, box-shadow .15s ease; }
@@ -53,17 +50,14 @@
   .m-plan { font-size:13px; color:var(--text2); margin-top:10px; }
   .m-plan b, .m-now b { color:var(--text); font-size:16px; }
   .m-now { font-size:13px; color:var(--text2); margin-top:2px; }
+  /* 预算完成度进度条 */
+  .bar { height:6px; background:#eef4f2; border-radius:3px; margin-top:10px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:linear-gradient(90deg,#4a8576,#2f5d50); border-radius:3px; }
 
   .card-title { font-size:15px; font-weight:700; margin:26px 0 12px; }
-  .pie-card { background:var(--card); border-radius:var(--radius); padding:20px;
+  .pie-card { background:var(--card); border-radius:var(--radius); padding:14px 14px 8px;
               box-shadow:0 2px 10px rgba(0,0,0,.05); }
-  .pie-row { display:flex; align-items:center; gap:20px; }
-  .pie-legend { flex:1; }
-  .legend-item { display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; }
-  .legend-item .dot { width:10px; height:10px; border-radius:3px; }
-  .legend-item .amt { margin-left:auto; color:var(--text2); }
 
-  /* 记账表单 */
   .form-card { background:var(--card); border-radius:var(--radius); padding:20px;
                box-shadow:0 2px 10px rgba(0,0,0,.05); }
   .field { margin-bottom:14px; }
@@ -73,7 +67,6 @@
         transition:border-color .15s ease, background .15s ease; }
   .field input:focus { border-color:var(--accent); background:#fff; }
 
-  /* 立体按钮 */
   .btn { width:100%; padding:14px; font-size:15px; font-weight:600; color:#fff; border:none;
          border-radius:var(--radius-s); cursor:pointer; margin-top:4px;
          background:linear-gradient(180deg,#3a6e5f,#2f5d50);
@@ -82,7 +75,6 @@
   .btn:hover { transform:scale(1.04); box-shadow:0 6px 14px rgba(47,93,80,.32), inset 0 1px 0 rgba(255,255,255,.22); }
   .btn:active { transform:scale(.98); box-shadow:0 2px 5px rgba(47,93,80,.25), inset 0 1px 0 rgba(255,255,255,.22); }
 
-  /* 最近账目 */
   .ledger { background:var(--card); border-radius:var(--radius); padding:6px 20px;
             box-shadow:0 2px 10px rgba(0,0,0,.05); }
   .entry { display:flex; align-items:center; padding:13px 0; border-bottom:1px solid var(--line); }
@@ -104,10 +96,11 @@
   <div class="nav">
     <button id="navHome" class="active" onclick="showPage('home')">主页</button>
     <button id="navExpense" onclick="showPage('expense')">记支出</button>
+    <button id="navAssets" onclick="showPage('assets')">总资产</button>
     <button id="navLedger" onclick="showPage('ledger')">最近账目</button>
   </div>
 
-  <!-- ===== 主页：可用资金 + 4模块 + 支出饼图 + 记收入 ===== -->
+  <!-- ===== 主页：本月收支 + 看板 ===== -->
   <div class="page active" id="page-home">
     <div class="total">
       <div class="t-left">
@@ -121,14 +114,17 @@
       </div>
     </div>
 
+    <div class="card-title">预算完成度</div>
     <div class="modules" id="modulesGrid"></div>
 
     <div class="card-title">本月支出分布</div>
     <div class="pie-card">
-      <div class="pie-row">
-        <svg id="pieSvg" width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0"></svg>
-        <div class="pie-legend" id="pieLegend"></div>
-      </div>
+      <div id="pieChart" style="width:100%;height:235px"></div>
+    </div>
+
+    <div class="card-title">近7天支出趋势</div>
+    <div class="pie-card">
+      <div id="trendChart" style="width:100%;height:200px"></div>
     </div>
 
     <div class="card-title">记一笔收入</div>
@@ -155,6 +151,29 @@
     </div>
   </div>
 
+  <!-- ===== 总资产页 ===== -->
+  <div class="page" id="page-assets">
+    <div class="total">
+      <div class="t-left">
+        <div class="label">总资产</div>
+        <div class="num" id="assetTotal"></div>
+      </div>
+      <div class="t-right">
+        <div class="label">资金模块</div>
+        <div class="income" id="assetCount">4 个</div>
+        <div class="ratio" id="assetNote">应急+稳健+投资+日常</div>
+      </div>
+    </div>
+
+    <div class="card-title">资金分布</div>
+    <div class="modules" id="assetModules"></div>
+
+    <div class="card-title">资产占比</div>
+    <div class="pie-card">
+      <div id="assetChart" style="width:100%;height:235px"></div>
+    </div>
+  </div>
+
   <!-- ===== 最近账目页 ===== -->
   <div class="page" id="page-ledger">
     <div class="card-title">最近账目</div>
@@ -162,13 +181,17 @@
   </div>
 </div>
 
+<script src="echarts.min.js"></script>
 <script>
-  // ===== 导航切换：显示对应页面区块 =====
+  let pieInst, trendInst, assetInst;   // ECharts 实例（切页后要 resize）
+
+  // ===== 导航切换 =====
   function showPage(name) {
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     document.getElementById("page-" + name).classList.add("active");
     document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
     document.getElementById("nav" + name[0].toUpperCase() + name.slice(1)).classList.add("active");
+    setTimeout(() => { [pieInst, trendInst, assetInst].forEach(i => i && i.resize()); }, 60);
   }
 
   // ===== 加载：最近账目 =====
@@ -191,33 +214,47 @@
     }
   }
 
-  // ===== 加载：支出饼图 =====
+  // ===== 加载：支出饼图（ECharts 环形） =====
   const PIE_COLORS = ["#2f5d50", "#4a8576", "#a3c4bb", "#d9e8e4", "#c8b6a6"];
   async function loadSummary() {
     const res = await fetch("/api/summary");
     const data = await res.json();
-    const svg = document.getElementById("pieSvg");
-    const legend = document.getElementById("pieLegend");
-    const C = 2 * Math.PI * 15.9;
-    let offset = 0, svgInner = "", legendInner = "";
-
-    svgInner += `
-      <text x="21" y="23" text-anchor="middle" font-size="5" fill="#2b2b2b" font-weight="700">${data.total}</text>
-      <text x="21" y="28" text-anchor="middle" font-size="3" fill="#8a8a8a">本月支出</text>`;
-
-    data.categories.forEach((c, i) => {
-      const frac = data.total ? c.amount / data.total : 0;
-      const color = PIE_COLORS[i % PIE_COLORS.length];
-      svgInner += `<circle cx="21" cy="21" r="15.9" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${frac * C} ${C}" stroke-dashoffset="${-offset * C}"/>`;
-      offset += frac;
-      legendInner += `<div class="legend-item"><span class="dot" style="background:${color}"></span>${c.category}<span class="amt">${c.amount}</span></div>`;
+    if (!pieInst) pieInst = echarts.init(document.getElementById("pieChart"));
+    pieInst.setOption({
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+      legend: { bottom: 0, icon: "circle", textStyle: { color: "#8a8a8a", fontSize: 12 }, itemWidth: 10, itemHeight: 10 },
+      series: [{
+        type: "pie", radius: ["52%", "72%"], center: ["50%", "43%"],
+        itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
+        label: { show: false }, color: PIE_COLORS,
+        data: data.categories.map(c => ({ name: c.category, value: c.amount })),
+      }],
+      graphic: [
+        { type: "text", left: "center", top: "34%", style: { text: String(data.total), fill: "#2b2b2b", fontSize: 22, fontWeight: "bold" } },
+        { type: "text", left: "center", top: "48%", style: { text: "本月支出", fill: "#8a8a8a", fontSize: 12 } },
+      ],
     });
-
-    svg.innerHTML = svgInner;
-    legend.innerHTML = legendInner;
   }
 
-  // ===== 加载：资金概览（可用资金 + 4模块） =====
+  // ===== 加载：近7天支出趋势（ECharts 折线） =====
+  async function loadTrend() {
+    const res = await fetch("/api/trend");
+    const data = await res.json();
+    if (!trendInst) trendInst = echarts.init(document.getElementById("trendChart"));
+    trendInst.setOption({
+      tooltip: { trigger: "axis" },
+      grid: { left: 40, right: 16, top: 20, bottom: 26 },
+      xAxis: { type: "category", data: data.dates, axisLabel: { color: "#8a8a8a" }, axisLine: { lineStyle: { color: "#eee" } } },
+      yAxis: { type: "value", axisLabel: { color: "#8a8a8a" }, splitLine: { lineStyle: { color: "#f0f0f0" } } },
+      series: [{
+        type: "line", data: data.amounts, smooth: true, symbol: "circle", symbolSize: 7,
+        lineStyle: { color: "#2f5d50", width: 3 }, itemStyle: { color: "#2f5d50" },
+        areaStyle: { color: "rgba(47,93,80,0.12)" },
+      }],
+    });
+  }
+
+  // ===== 加载：资金概览 + 预算完成度 =====
   async function loadOverview() {
     const res = await fetch("/api/overview");
     const data = await res.json();
@@ -228,13 +265,49 @@
     const grid = document.getElementById("modulesGrid");
     grid.innerHTML = "";
     for (const m of data.modules) {
+      const pct = m.plan > 0 ? Math.min(100, Math.round(m.current / m.plan * 100)) : 0;
       grid.innerHTML += `
         <div class="mod">
           <div class="m-name">${m.name}<span class="m-pct">${m.pct}%</span></div>
           <div class="m-plan">应分配 <b>${m.plan}</b></div>
           <div class="m-now">当前 <b>${m.current}</b></div>
+          <div class="bar"><i style="width:${pct}%"></i></div>
         </div>`;
     }
+  }
+
+  // ===== 加载：总资产 =====
+  async function loadAssets() {
+    const res = await fetch("/api/assets");
+    const data = await res.json();
+    document.getElementById("assetTotal").innerHTML = `${data.total}<span> 元</span>`;
+
+    const grid = document.getElementById("assetModules");
+    grid.innerHTML = "";
+    for (const m of data.modules) {
+      grid.innerHTML += `
+        <div class="mod">
+          <div class="m-name">${m.name}<span class="m-pct">${m.pct}%</span></div>
+          <div class="m-plan">当前 <b>${m.current}</b></div>
+          <div class="m-now">占比 ${m.ratio}%</div>
+        </div>`;
+    }
+
+    if (!assetInst) assetInst = echarts.init(document.getElementById("assetChart"));
+    assetInst.setOption({
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+      legend: { bottom: 0, icon: "circle", textStyle: { color: "#8a8a8a", fontSize: 12 }, itemWidth: 10, itemHeight: 10 },
+      series: [{
+        type: "pie", radius: ["52%", "72%"], center: ["50%", "43%"],
+        itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
+        label: { show: false }, color: PIE_COLORS,
+        data: data.modules.map(m => ({ name: m.name, value: m.current })),
+      }],
+      graphic: [
+        { type: "text", left: "center", top: "34%", style: { text: String(data.total), fill: "#2b2b2b", fontSize: 22, fontWeight: "bold" } },
+        { type: "text", left: "center", top: "48%", style: { text: "总资产", fill: "#8a8a8a", fontSize: 12 } },
+      ],
+    });
   }
 
   // ===== 记收入 =====
@@ -249,7 +322,7 @@
       body: JSON.stringify({ date: today, category, amount: Number(amount), note, type: "income" }),
     });
     await res.json();
-    loadOverview();          // 收入变了 → 刷新资金概览
+    loadOverview();
     document.getElementById("incAmount").value = "";
   }
   document.getElementById("incBtn").onclick = addIncome;
@@ -268,6 +341,7 @@
     await res.json();
     loadLedger();
     loadSummary();
+    loadTrend();
     document.getElementById("expAmount").value = "";
   }
   document.getElementById("expBtn").onclick = addExpense;
@@ -275,7 +349,9 @@
   // 首次加载
   loadLedger();
   loadSummary();
+  loadTrend();
   loadOverview();
+  loadAssets();
 </script>
 </body>
 </html>

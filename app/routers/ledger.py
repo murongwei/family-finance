@@ -58,13 +58,16 @@ def summary():
 @router.get("/overview")
 def overview():
     """资金概览：可用资金/收入/4模块（预算规则模拟，后面填真实数据）"""
-    available = 6400     # 可用资金（模拟，后填真实）
-    # 本月收入 = 数据库里 type=income 的收入记录之和（记收入会自动加进来）
+    initial = 0     # 期初资金（用户选0，后填真实存款）
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS t FROM ledger WHERE type='income'"
-        ).fetchone()
-    income = row["t"]
+        inc = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
+        ).fetchone()[0]
+        exp = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='expense'"
+        ).fetchone()[0]
+    income = inc
+    available = initial + income - exp    # 可用资金 = 期初 + 收入 − 支出（真实联动）
     modules = [
         {"name": "应急救命", "pct": 30, "current": 2000},
         {"name": "稳健理财", "pct": 30, "current": 1900},
@@ -74,3 +77,30 @@ def overview():
     for m in modules:
         m["plan"] = round(available * m["pct"] / 100)   # 应分配 = 可用 × 比例
     return {"available": available, "income": income, "modules": modules}
+
+
+@router.get("/assets")
+def assets():
+    """总资产页：自己拥有的全部 = 4资金模块余额之和（模拟，后填真实）"""
+    modules = [
+        {"name": "应急救命", "pct": 30, "current": 2000},
+        {"name": "稳健理财", "pct": 30, "current": 1900},
+        {"name": "个人投资", "pct": 30, "current": 1800},
+        {"name": "日常娱乐", "pct": 10, "current": 700},
+    ]
+    total = sum(m["current"] for m in modules)
+    for m in modules:
+        m["ratio"] = round(m["current"] / total * 100) if total else 0   # 每模块占比
+    return {"total": total, "modules": modules}
+
+
+@router.get("/trend")
+def trend():
+    """近7天支出趋势：按日期聚合每日支出（喂折线图，从早到晚）"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT date, SUM(amount) AS total FROM ledger "
+            "WHERE type='expense' GROUP BY date ORDER BY date DESC LIMIT 7"
+        ).fetchall()
+    rows = rows[::-1]   # 升序：早 → 晚
+    return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
