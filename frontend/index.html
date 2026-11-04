@@ -113,6 +113,25 @@
   .inv-actions { display:flex; gap:10px; }
   .inv-red { background:linear-gradient(180deg,#c97a63,#b05b4a); box-shadow:0 3px 8px rgba(176,91,74,.3), inset 0 1px 0 rgba(255,255,255,.2); }
   .inv-red:hover { box-shadow:0 6px 14px rgba(176,91,74,.34), inset 0 1px 0 rgba(255,255,255,.2); }
+
+  /* ===== 手机适配（窄屏） ===== */
+  @media (max-width:520px) {
+    body { padding:16px 12px 52px; }
+    .app-title { font-size:19px; }
+    .app-sub { margin-bottom:18px; }
+    .nav { gap:4px; padding:5px; }
+    .nav button { font-size:12px; padding:11px 0; }
+    .quote-grid { grid-template-columns:1fr; }
+    .total { padding:16px; }
+    .total .num { font-size:27px; }
+    .modules { gap:10px; }
+    .mod { padding:13px 14px; }
+    .entry .e-amt { font-size:15px; }
+    .pie-card { padding:10px 10px 4px; }
+    .form-card { padding:16px; }
+    .field input, .field select { padding:11px 12px; font-size:14px; }
+    .btn { padding:13px; }
+  }
 </style>
 </head>
 <body>
