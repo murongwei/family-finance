@@ -44,6 +44,14 @@ def list_entries():
     return [dict(r) for r in rows]
 
 
+@router.delete("/entries/{entry_id}")
+def delete_entry(entry_id: int):
+    """删除一条账目"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ledger WHERE id=?", (entry_id,))
+    return {"ok": True}
+
+
 @router.get("/summary")
 def summary():
     """本月支出按分类统计：每类金额 + 总计（喂给饼图，只统计支出）"""
@@ -59,9 +67,9 @@ def summary():
 
 @router.get("/overview")
 def overview():
-    """资金概览：可用资金/收入/4模块（预算规则模拟，后面填真实数据）"""
-    initial = 0     # 期初资金（用户选0，后填真实存款）
+    """资金概览：可用资金/收入/4模块（期初资金从 settings 读，模块余额预算模拟）"""
     with get_conn() as conn:
+        initial = float(_get_setting(conn, "initial", "0"))   # 期初资金（真实存款）
         inc = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE type='income'"
         ).fetchone()[0]
@@ -106,6 +114,34 @@ def trend():
         ).fetchall()
     rows = rows[::-1]   # 升序：早 → 晚
     return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
+
+
+class Settings(BaseModel):
+    """资金设置：期初资金 + 各投资模块投入本金"""
+    initial: float = 0
+    wenwen_principal: float = 0
+    touzi_principal: float = 0
+
+
+@router.get("/settings")
+def get_settings():
+    """读取资金设置：期初资金 + 各投资模块投入本金"""
+    with get_conn() as conn:
+        return {
+            "initial": float(_get_setting(conn, "initial", "0")),
+            "wenwen_principal": float(_get_setting(conn, "wenwen_principal", "0")),
+            "touzi_principal": float(_get_setting(conn, "touzi_principal", "0")),
+        }
+
+
+@router.post("/settings")
+def save_settings(s: Settings):
+    """保存资金设置（填真实数据后盈亏激活）"""
+    with get_conn() as conn:
+        for k, v in [("initial", s.initial), ("wenwen_principal", s.wenwen_principal),
+                     ("touzi_principal", s.touzi_principal)]:
+            conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", (k, str(v)))
+    return {"ok": True}
 
 
 QUOTES_TTL = 300          # 行情缓存 5 分钟
