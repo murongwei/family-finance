@@ -64,3 +64,24 @@ def init_db():
             )
             """
         )
+        # 分类表：内置 + 自定义；builtin=1 内置不可删
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS categories (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                name    TEXT    NOT NULL,
+                type    TEXT    NOT NULL,   -- expense支出 / income收入
+                builtin INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        BUILTIN = [
+            ("饮食", "expense"), ("交通", "expense"), ("住房", "expense"),
+            ("购物", "expense"), ("医疗", "expense"), ("其他", "expense"),
+            ("工资", "income"), ("奖金", "income"), ("理财", "income"),
+            ("红包", "income"), ("其他", "income"),
+        ]
+        for name, typ in BUILTIN:
+            if not conn.execute("SELECT 1 FROM categories WHERE name=? AND type=? AND builtin=1",
+                                (name, typ)).fetchone():
+                conn.execute("INSERT INTO categories(name, type, builtin) VALUES(?,?,1)", (name, typ))

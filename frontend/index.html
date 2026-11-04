@@ -124,6 +124,17 @@
         transition:transform .15s ease, box-shadow .15s ease; }
   .mini-btn:hover { transform:scale(1.04); box-shadow:0 4px 10px rgba(47,93,80,.3), inset 0 1px 0 rgba(255,255,255,.2); }
   .card-title-row { display:flex; justify-content:space-between; align-items:center; }
+  .cat-row { display:flex; gap:8px; }
+  .cat-row select { flex:1; }
+  .cat-row .mini-btn { flex:0 0 auto; }
+  .cat-modal { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:50; }
+  .cat-box { background:var(--card); border-radius:var(--radius); width:88%; max-width:340px; padding:20px; box-shadow:0 8px 30px rgba(0,0,0,.2); }
+  .cat-head { display:flex; justify-content:space-between; align-items:center; font-size:15px; font-weight:700; margin-bottom:12px; }
+  .cat-close { border:none; background:#eef1ef; color:var(--text2); width:28px; height:28px; border-radius:8px; cursor:pointer; font-size:16px; }
+  .cat-item { display:flex; justify-content:space-between; align-items:center; padding:9px 12px; background:#fafaf9; border-radius:10px; margin-bottom:8px; font-size:14px; }
+  .cat-item .del { padding:4px 9px; font-size:12px; }
+  .cat-add { display:flex; gap:8px; margin-top:6px; }
+  .cat-add input { flex:1; padding:10px 12px; font-size:14px; border:1px solid var(--line); border-radius:10px; background:#fafaf9; outline:none; }
   .empty { text-align:center; color:var(--text2); font-size:14px; padding:28px 0; }
   .inv-actions { display:flex; gap:10px; }
   .inv-red { background:linear-gradient(180deg,#c97a63,#b05b4a); box-shadow:0 3px 8px rgba(176,91,74,.3), inset 0 1px 0 rgba(255,255,255,.2); }
@@ -194,7 +205,10 @@
     <div class="form-card">
       <div class="field"><label>金额（元）</label><input type="number" id="incAmount" placeholder="0.00"></div>
       <div class="field"><label>分类</label>
-        <select id="incCategory"><option>工资</option><option>奖金</option><option>理财</option><option>红包</option><option>其他</option></select>
+        <div class="cat-row">
+          <select id="incCategory"></select>
+          <button class="mini-btn" onclick="openCatManage('income')">管理</button>
+        </div>
       </div>
       <div class="field"><label>备注</label><input type="text" id="incNote" placeholder="选填，一句话"></div>
       <button class="btn" id="incBtn">记收入</button>
@@ -207,7 +221,10 @@
     <div class="form-card">
       <div class="field"><label>金额（元）</label><input type="number" id="expAmount" placeholder="0.00"></div>
       <div class="field"><label>分类</label>
-        <select id="expCategory"><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
+        <div class="cat-row">
+          <select id="expCategory"></select>
+          <button class="mini-btn" onclick="openCatManage('expense')">管理</button>
+        </div>
       </div>
       <div class="field"><label>备注</label><input type="text" id="expNote" placeholder="选填，一句话"></div>
       <button class="btn" id="expBtn">记支出</button>
@@ -234,6 +251,15 @@
     <div class="card-title">资产占比</div>
     <div class="pie-card">
       <div id="assetChart" style="width:100%;height:235px"></div>
+    </div>
+
+    <div class="card-title">预算分配比例</div>
+    <div class="form-card">
+      <div class="field"><label>应急救命 %</label><input type="number" id="bdEmer"></div>
+      <div class="field"><label>稳健理财 %</label><input type="number" id="bdWen"></div>
+      <div class="field"><label>个人投资 %</label><input type="number" id="bdTou"></div>
+      <div class="field"><label>日常娱乐 %</label><input type="number" id="bdDaily"></div>
+      <button class="btn" id="bdBtn" onclick="saveBudget()">保存比例</button>
     </div>
   </div>
 
@@ -280,6 +306,18 @@
       <button id="mthall" onclick="setMonth('all')">全部</button>
     </div>
     <div class="ledger" id="ledgerList"></div>
+  </div>
+
+  <!-- 分类管理弹窗 -->
+  <div class="cat-modal" id="catModal">
+    <div class="cat-box">
+      <div class="cat-head">管理分类 <button class="cat-close" onclick="closeCatManage()">×</button></div>
+      <div id="catList"></div>
+      <div class="cat-add">
+        <input id="catNewName" placeholder="新分类名">
+        <button class="mini-btn" onclick="addCategory()">添加</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -381,6 +419,60 @@
     a.href = url; a.download = "账目备份.csv";
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  // ===== 分类管理（动态加载 + 自定义） =====
+  let catType = "expense";
+  async function loadCategories() {
+    const data = await (await fetch("/api/categories")).json();
+    document.getElementById("incCategory").innerHTML =
+      data.income.map(c => `<option value="${c.name}">${c.name}</option>`).join("");
+    document.getElementById("expCategory").innerHTML =
+      data.expense.map(c => `<option value="${c.name}">${c.name}</option>`).join("");
+  }
+  function openCatManage(type) { catType = type; renderCatList();
+    document.getElementById("catModal").style.display = "flex"; }
+  function closeCatManage() { document.getElementById("catModal").style.display = "none"; }
+  async function renderCatList() {
+    const data = await (await fetch("/api/categories")).json();
+    const list = data[catType];
+    document.getElementById("catList").innerHTML = list.map(c =>
+      `<div class="cat-item"><span>${c.name}</span>${c.builtin ? "" :
+        `<button class="del" onclick="deleteCategory(${c.id})">删</button>`}</div>`
+    ).join("") || `<div class="empty">暂无分类</div>`;
+  }
+  async function deleteCategory(id) {
+    await fetch("/api/categories/" + id, { method: "DELETE" });
+    renderCatList(); loadCategories();
+  }
+  async function addCategory() {
+    const name = document.getElementById("catNewName").value.trim();
+    if (!name) return;
+    await fetch("/api/categories", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, type: catType }) });
+    document.getElementById("catNewName").value = "";
+    renderCatList(); loadCategories();
+  }
+
+  // ===== 预算分配比例（可调） =====
+  async function loadBudget() {
+    const d = await (await fetch("/api/budget")).json();
+    document.getElementById("bdEmer").value = d.emergency;
+    document.getElementById("bdWen").value = d.wenwen;
+    document.getElementById("bdTou").value = d.touzi;
+    document.getElementById("bdDaily").value = d.daily;
+  }
+  async function saveBudget() {
+    const body = {
+      emergency: Number(document.getElementById("bdEmer").value),
+      wenwen: Number(document.getElementById("bdWen").value),
+      touzi: Number(document.getElementById("bdTou").value),
+      daily: Number(document.getElementById("bdDaily").value),
+    };
+    await fetch("/api/budget", { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    loadOverview();
   }
   async function deleteEntry(id) {
     await fetch("/api/entries/" + id, { method: "DELETE" });
@@ -611,6 +703,8 @@
   loadOverview();
   loadAssets();
   loadInvest();
+  loadCategories();
+  loadBudget();
 </script>
 </body>
 </html>

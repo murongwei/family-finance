@@ -112,12 +112,16 @@ def overview():
         ).fetchone()[0]
         w = round(_get_principal(conn, "wenwen"), 2)
         t = round(_get_principal(conn, "touzi"), 2)
+        e_pct = int(_get_setting(conn, "budget_emergency", "30"))
+        w_pct = int(_get_setting(conn, "budget_wenwen", "30"))
+        t_pct = int(_get_setting(conn, "budget_touzi", "30"))
+        d_pct = int(_get_setting(conn, "budget_daily", "10"))
     available = round(inc - exp - net_invest, 2)   # 手上可用 = 收入 − 支出 − 投进理财的钱 + 赎回
     modules = [
-        {"name": "应急救命", "pct": 30, "current": 0},   # 应急/日常的钱在手边(可用资金里)
-        {"name": "稳健理财", "pct": 30, "current": w},
-        {"name": "个人投资", "pct": 30, "current": t},
-        {"name": "日常娱乐", "pct": 10, "current": 0},
+        {"name": "应急救命", "pct": e_pct, "current": 0},   # 应急/日常的钱在手边(可用资金里)
+        {"name": "稳健理财", "pct": w_pct, "current": w},
+        {"name": "个人投资", "pct": t_pct, "current": t},
+        {"name": "日常娱乐", "pct": d_pct, "current": 0},
     ]
     for m in modules:
         m["plan"] = round(available * m["pct"] / 100)   # 应分配 = 可用 × 比例
@@ -256,3 +260,75 @@ def invest():
         for key, _sym, name in QUOTES_TARGETS:
             modules[key] = {"name": name, "principal": round(_get_principal(conn, key), 2)}
     return {"modules": modules, "records": [dict(r) for r in records]}
+
+
+class CatRec(BaseModel):
+    """新增一个自定义分类"""
+    name: str
+    type: str   # expense支出 / income收入
+
+
+@router.get("/categories")
+def categories():
+    """全部分类：内置(builtin=1) + 自定义；按 支出/收入 分组"""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM categories ORDER BY builtin DESC, id ASC").fetchall()
+    result = {"expense": [], "income": []}
+    for r in rows:
+        result[r["type"]].append({"id": r["id"], "name": r["name"], "builtin": r["builtin"]})
+    return result
+
+
+@router.post("/categories")
+def add_category(rec: CatRec):
+    """加一个自定义分类（同名同类型去重）"""
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM categories WHERE name=? AND type=?",
+                        (rec.name, rec.type)).fetchone():
+            return {"ok": False, "msg": "分类已存在"}
+        cur = conn.execute("INSERT INTO categories(name, type, builtin) VALUES(?,?,0)",
+                           (rec.name, rec.type))
+    return {"ok": True, "id": cur.lastrowid}
+
+
+@router.delete("/categories/{cat_id}")
+def delete_category(cat_id: int):
+    """删一个自定义分类（内置不可删）"""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
+        if not row:
+            return {"ok": False, "msg": "分类不存在"}
+        if row["builtin"]:
+            return {"ok": False, "msg": "内置分类不可删"}
+        conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+    return {"ok": True}
+
+
+class BudgetRec(BaseModel):
+    """4资金模块的分配比例（加起来100）"""
+    emergency: int   # 应急救命
+    wenwen: int      # 稳健理财
+    touzi: int       # 个人投资
+    daily: int       # 日常娱乐
+
+
+@router.get("/budget")
+def budget():
+    """读取预算分配比例"""
+    with get_conn() as conn:
+        return {
+            "emergency": int(_get_setting(conn, "budget_emergency", "30")),
+            "wenwen": int(_get_setting(conn, "budget_wenwen", "30")),
+            "touzi": int(_get_setting(conn, "budget_touzi", "30")),
+            "daily": int(_get_setting(conn, "budget_daily", "10")),
+        }
+
+
+@router.put("/budget")
+def update_budget(rec: BudgetRec):
+    """保存预算分配比例（存 settings 表）"""
+    with get_conn() as conn:
+        for key, val in [("budget_emergency", rec.emergency), ("budget_wenwen", rec.wenwen),
+                         ("budget_touzi", rec.touzi), ("budget_daily", rec.daily)]:
+            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, str(val)))
+    return {"ok": True}
