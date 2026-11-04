@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>家庭理财管家</title>
 <style>
-  /* ===== 最终版：墨绿暖白 · 大圆角 · 立体按钮 · hover 交互 ===== */
+  /* ===== 墨绿暖白 · 大圆角 · 立体按钮 · hover · 三页导航 ===== */
   :root {
     --bg:#f6f6f4; --card:#fff; --accent:#2f5d50;
     --accent2:#4a8576; --accent3:#a3c4bb; --accent4:#d9e8e4;
@@ -19,6 +19,19 @@
   .app-title { font-size:22px; font-weight:700; letter-spacing:1px; margin-bottom:4px; }
   .app-sub { font-size:13px; color:var(--text2); margin-bottom:24px; }
 
+  /* 导航 */
+  .nav { display:flex; gap:8px; margin-bottom:24px; background:var(--card); padding:6px;
+         border-radius:var(--radius); box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .nav button { flex:1; padding:12px 0; font-size:14px; font-weight:600; border:none;
+        background:transparent; color:var(--text2); border-radius:var(--radius-s); cursor:pointer;
+        transition:background .15s ease, color .15s ease; }
+  .nav button.active { background:linear-gradient(180deg,#3a6e5f,#2f5d50); color:#fff;
+        box-shadow:0 3px 8px rgba(47,93,80,.28), inset 0 1px 0 rgba(255,255,255,.22); }
+
+  /* 页面区块：默认隐藏，点导航才显示 */
+  .page { display:none; }
+  .page.active { display:block; }
+
   /* 可用资金 + 收入占比 */
   .total { background:var(--card); border-radius:var(--radius); padding:22px; margin-bottom:20px;
            box-shadow:0 2px 10px rgba(0,0,0,.05); display:flex; align-items:center; }
@@ -30,7 +43,7 @@
   .t-right .income { font-size:24px; font-weight:700; color:var(--accent); margin-top:4px; }
   .t-right .ratio { font-size:12px; color:var(--text2); margin-top:2px; }
 
-  /* 4 资金模块：应分配 + 当前 */
+  /* 4 资金模块 */
   .modules { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
   .mod { background:var(--card); border-radius:var(--radius); padding:16px 18px;
          box-shadow:0 2px 10px rgba(0,0,0,.05); transition:transform .15s ease, box-shadow .15s ease; }
@@ -60,7 +73,7 @@
         transition:border-color .15s ease, background .15s ease; }
   .field input:focus { border-color:var(--accent); background:#fff; }
 
-  /* 立体按钮 + hover 变大 */
+  /* 立体按钮 */
   .btn { width:100%; padding:14px; font-size:15px; font-weight:600; color:#fff; border:none;
          border-radius:var(--radius-s); cursor:pointer; margin-top:4px;
          background:linear-gradient(180deg,#3a6e5f,#2f5d50);
@@ -87,98 +100,105 @@
   <div class="app-title">家庭理财管家</div>
   <div class="app-sub">记一笔，看得清</div>
 
-  <!-- 可用资金 + 收入占比 -->
-  <div class="total">
-    <div class="t-left">
-      <div class="label">本月可用</div>
-      <div class="num" id="availNum"></div>
+  <!-- 导航 -->
+  <div class="nav">
+    <button id="navHome" class="active" onclick="showPage('home')">主页</button>
+    <button id="navExpense" onclick="showPage('expense')">记支出</button>
+    <button id="navLedger" onclick="showPage('ledger')">最近账目</button>
+  </div>
+
+  <!-- ===== 主页：可用资金 + 4模块 + 支出饼图 + 记收入 ===== -->
+  <div class="page active" id="page-home">
+    <div class="total">
+      <div class="t-left">
+        <div class="label">本月可用</div>
+        <div class="num" id="availNum"></div>
+      </div>
+      <div class="t-right">
+        <div class="label">本月收入</div>
+        <div class="income" id="incomeNum"></div>
+        <div class="ratio" id="incomeRatio"></div>
+      </div>
     </div>
-    <div class="t-right">
-      <div class="label">本月收入</div>
-      <div class="income" id="incomeNum"></div>
-      <div class="ratio" id="incomeRatio"></div>
+
+    <div class="modules" id="modulesGrid"></div>
+
+    <div class="card-title">本月支出分布</div>
+    <div class="pie-card">
+      <div class="pie-row">
+        <svg id="pieSvg" width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0"></svg>
+        <div class="pie-legend" id="pieLegend"></div>
+      </div>
+    </div>
+
+    <div class="card-title">记一笔收入</div>
+    <div class="form-card">
+      <div class="field"><label>金额（元）</label><input type="number" id="incAmount" placeholder="0.00"></div>
+      <div class="field"><label>分类</label>
+        <select id="incCategory"><option>工资</option><option>奖金</option><option>理财</option><option>红包</option><option>其他</option></select>
+      </div>
+      <div class="field"><label>备注</label><input type="text" id="incNote" placeholder="选填，一句话"></div>
+      <button class="btn" id="incBtn">记收入</button>
     </div>
   </div>
 
-  <!-- 4 资金模块：应分配 + 当前 -->
-  <div class="modules" id="modulesGrid">
-  </div>
-
-  <!-- 支出分布 -->
-  <div class="card-title">本月支出分布</div>
-  <div class="pie-card">
-    <div class="pie-row">
-      <svg id="pieSvg" width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0"></svg>
-      <div class="pie-legend" id="pieLegend"></div>
+  <!-- ===== 记支出页 ===== -->
+  <div class="page" id="page-expense">
+    <div class="card-title">记一笔支出</div>
+    <div class="form-card">
+      <div class="field"><label>金额（元）</label><input type="number" id="expAmount" placeholder="0.00"></div>
+      <div class="field"><label>分类</label>
+        <select id="expCategory"><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
+      </div>
+      <div class="field"><label>备注</label><input type="text" id="expNote" placeholder="选填，一句话"></div>
+      <button class="btn" id="expBtn">记支出</button>
     </div>
   </div>
 
-  <!-- 记一笔（后续独立成页） -->
-  <div class="card-title">记一笔</div>
-  <div class="form-card">
-    <div class="field"><label>金额（元）</label><input type="number" id="amount" placeholder="0.00"></div>
-    <div class="field"><label>分类</label>
-      <select id="category"><option>饮食</option><option>交通</option><option>住房</option><option>购物</option><option>医疗</option><option>其他</option></select>
-    </div>
-    <div class="field"><label>备注</label><input type="text" id="note" placeholder="选填，一句话"></div>
-    <button class="btn" id="addBtn">记下来</button>
-  </div>
-
-  <!-- 最近账目（后续独立成页） -->
-  <div class="card-title">最近账目</div>
-  <div class="ledger" id="ledgerList">
+  <!-- ===== 最近账目页 ===== -->
+  <div class="page" id="page-ledger">
+    <div class="card-title">最近账目</div>
+    <div class="ledger" id="ledgerList"></div>
   </div>
 </div>
+
 <script>
+  // ===== 导航切换：显示对应页面区块 =====
+  function showPage(name) {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.getElementById("page-" + name).classList.add("active");
+    document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
+    document.getElementById("nav" + name[0].toUpperCase() + name.slice(1)).classList.add("active");
+  }
+
+  // ===== 加载：最近账目 =====
   async function loadLedger() {
     const res = await fetch("/api/entries");
     const data = await res.json();
-    console.log(data);
-
     const list = document.getElementById("ledgerList");
     list.innerHTML = "";
     for (const item of data) {
+      const tag = item.type === "income" ? "收" : "支";
       list.innerHTML += `
         <div class="entry">
           <div class="e-cat">${item.category[0]}</div>
           <div class="e-info">
-            <div class="e-name">${item.category}</div>
+            <div class="e-name">${tag}·${item.category}</div>
             <div class="e-note">${item.date} · ${item.note || ""}</div>
           </div>
-          <div class="e-amt">${item.amount}</div>
-        </div>
-      `;
+          <div class="e-amt">${tag === "收" ? "+" : ""}${item.amount}</div>
+        </div>`;
     }
   }
-  loadLedger();
 
-  // ===== P1-3：记一笔 → POST 到后端 → 刷新列表 =====
-  async function addEntry() {
-    const amount = document.getElementById("amount").value;
-    const category = document.getElementById("category").value;
-    const note = document.getElementById("note").value;
-    const today = new Date().toISOString().slice(0, 10);
-
-    const res = await fetch("/api/entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ date: today, category, amount: Number(amount), note }),
-    });
-    await res.json();
-    loadLedger();
-    loadSummary();   // 记完一笔，饼图也跟着刷新
-  }
-  document.getElementById("addBtn").onclick = addEntry;
-
-  // ===== B：饼图接真实统计 =====
+  // ===== 加载：支出饼图 =====
   const PIE_COLORS = ["#2f5d50", "#4a8576", "#a3c4bb", "#d9e8e4", "#c8b6a6"];
   async function loadSummary() {
     const res = await fetch("/api/summary");
     const data = await res.json();
-
     const svg = document.getElementById("pieSvg");
     const legend = document.getElementById("pieLegend");
-    const C = 2 * Math.PI * 15.9;          // 圆环周长
+    const C = 2 * Math.PI * 15.9;
     let offset = 0, svgInner = "", legendInner = "";
 
     svgInner += `
@@ -196,13 +216,11 @@
     svg.innerHTML = svgInner;
     legend.innerHTML = legendInner;
   }
-  loadSummary();
 
-  // ===== 资金概览：可用资金 + 4模块（预算规则模拟） =====
+  // ===== 加载：资金概览（可用资金 + 4模块） =====
   async function loadOverview() {
     const res = await fetch("/api/overview");
     const data = await res.json();
-
     document.getElementById("availNum").innerHTML = `${data.available}<span> 元</span>`;
     document.getElementById("incomeNum").textContent = "+" + data.income;
     document.getElementById("incomeRatio").textContent = "占可用 " + Math.round(data.income / data.available * 100) + "%";
@@ -218,6 +236,45 @@
         </div>`;
     }
   }
+
+  // ===== 记收入 =====
+  async function addIncome() {
+    const amount = document.getElementById("incAmount").value;
+    const category = document.getElementById("incCategory").value;
+    const note = document.getElementById("incNote").value;
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch("/api/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: today, category, amount: Number(amount), note, type: "income" }),
+    });
+    await res.json();
+    loadOverview();          // 收入变了 → 刷新资金概览
+    document.getElementById("incAmount").value = "";
+  }
+  document.getElementById("incBtn").onclick = addIncome;
+
+  // ===== 记支出 =====
+  async function addExpense() {
+    const amount = document.getElementById("expAmount").value;
+    const category = document.getElementById("expCategory").value;
+    const note = document.getElementById("expNote").value;
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch("/api/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: today, category, amount: Number(amount), note, type: "expense" }),
+    });
+    await res.json();
+    loadLedger();
+    loadSummary();
+    document.getElementById("expAmount").value = "";
+  }
+  document.getElementById("expBtn").onclick = addExpense;
+
+  // 首次加载
+  loadLedger();
+  loadSummary();
   loadOverview();
 </script>
 </body>

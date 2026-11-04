@@ -21,9 +21,14 @@ def init_db():
             CREATE TABLE IF NOT EXISTS ledger (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 date     TEXT    NOT NULL,     -- 日期，如 2026-11-04
-                category TEXT    NOT NULL,     -- 分类，如 饮食/交通/住房
-                amount   REAL    NOT NULL,     -- 金额（元），正数记支出
-                note     TEXT                 -- 备注，可空
+                category TEXT    NOT NULL,     -- 分类，如 饮食/交通/工资
+                amount   REAL    NOT NULL,     -- 金额（元）
+                note     TEXT,                 -- 备注，可空
+                type     TEXT    NOT NULL DEFAULT 'expense'   -- expense支出 / income收入
             )
             """
         )
+        # 兼容旧表：若缺 type 列则补（已有数据默认记支出）
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(ledger)")]
+        if "type" not in cols:
+            conn.execute("ALTER TABLE ledger ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'")
