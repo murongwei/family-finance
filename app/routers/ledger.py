@@ -1,4 +1,6 @@
 """记账 API —— 家庭极简理财管家 P1"""
+import json
+import time as _time
 from fastapi import APIRouter
 from pydantic import BaseModel
 from ..database import get_conn
@@ -106,24 +108,59 @@ def trend():
     return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
 
 
-@router.get("/quotes")
-def quotes():
-    """投资行情：稳健理财接国债指数(sh000012)、个人投资接沪深300(sh000300)
-    近30交易日真实净值走势 + 区间涨跌幅（akshare，依赖外网，失败时返回 error）"""
-    result = {}
-    targets = [("wenwen", "sh000012", "稳健理财"), ("touzi", "sh000300", "个人投资")]
+QUOTES_TTL = 300          # 行情缓存 5 分钟
+QUOTES_TARGETS = [("wenwen", "sh000012", "稳健理财"), ("touzi", "sh000300", "个人投资")]
+
+
+def _fetch_quote(sym):
+    """akshare 拉指数近30交易日；返回 {latest, change, day_change, dates, values}，失败返回 None"""
     try:
         import akshare as ak
-        for key, sym, name in targets:
-            try:
-                df = ak.stock_zh_index_daily(symbol=sym).tail(30)
-                values = [round(float(x), 2) for x in df["close"].tolist()]
-                dates = [str(d)[:10] for d in df["date"].tolist()]
-                change = round((values[-1] - values[0]) / values[0] * 100, 2)
-                result[key] = {"name": name, "latest": values[-1],
-                               "change": change, "dates": dates, "values": values}
-            except Exception as e:
-                result[key] = {"name": name, "error": str(e)}
-    except Exception as e:
-        return {"ok": False, "error": "akshare 不可用: " + str(e)}
+        df = ak.stock_zh_index_daily(symbol=sym).tail(30)
+        values = [round(float(x), 2) for x in df["close"].tolist()]
+        dates = [str(d)[:10] for d in df["date"].tolist()]
+        if len(values) < 2:
+            return None
+        change = round((values[-1] - values[0]) / values[0] * 100, 2)         # 区间(30日)涨跌
+        day_change = round((values[-1] - values[-2]) / values[-2] * 100, 2)   # 单日涨跌
+        return {"latest": values[-1], "change": change, "day_change": day_change,
+                "dates": dates, "values": values}
+    except Exception:
+        return None
+
+
+def _get_setting(conn, key, default="0"):
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+@router.get("/quotes")
+def quotes():
+    """投资行情：先读本地缓存(5分钟内)，过期才拉 akshare 刷新；断网时返回最近缓存。
+    按投入本金算市值/总盈亏/单日盈亏（本金=0 则前端纯展示行情+推荐）"""
+    now = _time.time()
+    result = {}
+    with get_conn() as conn:
+        for key, sym, name in QUOTES_TARGETS:
+            row = conn.execute("SELECT data, updated_at FROM quotes_cache WHERE key=?", (key,)).fetchone()
+            data = json.loads(row["data"]) if row else None
+            stale = row is None or now - row["updated_at"] > QUOTES_TTL
+            if stale:
+                fresh = _fetch_quote(sym)
+                if fresh:
+                    data = fresh
+                    conn.execute(
+                        "INSERT OR REPLACE INTO quotes_cache(key, data, updated_at) VALUES(?,?,?)",
+                        (key, json.dumps(fresh), now))
+
+            principal = float(_get_setting(conn, key + "_principal", "0"))   # 该模块投入本金
+            if data is None:
+                result[key] = {"name": name, "principal": principal, "error": "暂无行情（请检查网络）"}
+            else:
+                market_value = round(principal * (1 + data["change"] / 100), 2)      # 当前市值
+                total_pnl = round(market_value - principal, 2)                        # 总盈亏
+                day_pnl = round(principal * data["day_change"] / 100, 2)              # 单日盈亏
+                result[key] = {**data, "name": name, "principal": principal,
+                               "market_value": market_value, "total_pnl": total_pnl,
+                               "day_pnl": day_pnl, "cached_at": _time.strftime("%m-%d %H:%M")}
     return result

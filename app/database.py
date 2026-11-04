@@ -32,3 +32,23 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(ledger)")]
         if "type" not in cols:
             conn.execute("ALTER TABLE ledger ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'")
+
+        # 行情缓存表：akshare 数据定时落库，前端读缓存不依赖外网
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quotes_cache (
+                key        TEXT PRIMARY KEY,
+                data       TEXT,        -- 行情 JSON（dates/values/latest/change/day_change）
+                updated_at REAL         -- 最后刷新时间戳
+            )
+            """
+        )
+        # 设置表：存期初资金、各模块投入本金等
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )

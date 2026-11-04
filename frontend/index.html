@@ -64,6 +64,11 @@
   .up { color:#2f9d6a; }
   .down { color:#c05b4a; }
   .q-err { font-size:12px; color:var(--text2); padding:8px 0 10px; }
+  .q-mv { font-size:13px; color:var(--text2); margin-top:2px; }
+  .q-mv b { font-size:18px; color:var(--text); }
+  .q-pnl { font-size:12px; margin:4px 0 6px; }
+  .q-pnl i { font-style:normal; font-weight:600; }
+  .q-rec { font-size:12px; color:var(--text2); margin:6px 0 2px; }
 
   .card-title { font-size:15px; font-weight:700; margin:26px 0 12px; }
   .pie-card { background:var(--card); border-radius:var(--radius); padding:14px 14px 8px;
@@ -325,7 +330,7 @@
     });
   }
 
-  // ===== 加载：投资行情（akshare 真实净值） =====
+  // ===== 加载：投资行情（有资金→市值+盈亏；无资金→行情+推荐） =====
   async function loadQuotes() {
     const res = await fetch("/api/quotes");
     const data = await res.json();
@@ -335,16 +340,30 @@
       const q = data[key];
       if (!q) continue;
       if (q.error) {
-        grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div><div class="q-err">行情暂不可用</div></div>`;
+        grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div><div class="q-err">${q.error}</div></div>`;
         continue;
       }
       const cls = q.change >= 0 ? "up" : "down";
-      const arrow = q.change >= 0 ? "+" + q.change : q.change;
-      grid.innerHTML += `
-        <div class="quote-card">
-          <div class="q-head"><b>${q.name}</b><span class="q-latest">${q.latest}<i class="${cls}">${arrow}%</i></span></div>
-          <div id="quote-${key}" style="width:100%;height:120px"></div>
-        </div>`;
+      const arrow = (q.change >= 0 ? "+" : "") + q.change;
+      let body = "";
+      if (q.principal > 0) {
+        const pcls = q.total_pnl >= 0 ? "up" : "down";
+        const dcls = q.day_pnl >= 0 ? "up" : "down";
+        const pArrow = (q.total_pnl >= 0 ? "+" : "") + q.total_pnl;
+        const dArrow = (q.day_pnl >= 0 ? "+" : "") + q.day_pnl;
+        body = `
+          <div class="q-mv">市值 <b>${q.market_value}</b> 元</div>
+          <div class="q-pnl">总盈亏 <i class="${pcls}">${pArrow}</i> · 单日 <i class="${dcls}">${dArrow}</i></div>
+          <div id="quote-${key}" style="width:100%;height:105px"></div>
+          <div class="q-err">更新 ${q.cached_at}</div>`;
+      } else {
+        body = `
+          <div class="q-latest">${q.latest}<i class="${cls}">${arrow}%</i></div>
+          <div class="q-rec">${q.change >= 0 ? "近期走高，可关注回调风险" : "近期回调，可分批布局"}</div>
+          <div id="quote-${key}" style="width:100%;height:105px"></div>
+          <div class="q-err">更新 ${q.cached_at}</div>`;
+      }
+      grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div>${body}</div>`;
     }
     for (const key of ["wenwen", "touzi"]) {
       const q = data[key];
