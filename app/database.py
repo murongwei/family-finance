@@ -52,3 +52,15 @@ def init_db():
             )
             """
         )
+        # 投资流水表：投入/赎回记录，累计本金真实化
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invest_records (
+                id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                date   TEXT    NOT NULL,
+                module TEXT    NOT NULL,   -- wenwen稳健 / touzi投资
+                action TEXT    NOT NULL,   -- add投入 / remove赎回
+                amount REAL    NOT NULL
+            )
+            """
+        )

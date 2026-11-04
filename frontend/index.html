@@ -110,6 +110,9 @@
         border-radius:8px; cursor:pointer; margin-left:10px; }
   .entry .del:hover { background:#f5d9d3; }
   .empty { text-align:center; color:var(--text2); font-size:14px; padding:28px 0; }
+  .inv-actions { display:flex; gap:10px; }
+  .inv-red { background:linear-gradient(180deg,#c97a63,#b05b4a); box-shadow:0 3px 8px rgba(176,91,74,.3), inset 0 1px 0 rgba(255,255,255,.2); }
+  .inv-red:hover { box-shadow:0 6px 14px rgba(176,91,74,.34), inset 0 1px 0 rgba(255,255,255,.2); }
 </style>
 </head>
 <body>
@@ -122,6 +125,7 @@
     <button id="navHome" class="active" onclick="showPage('home')">主页</button>
     <button id="navExpense" onclick="showPage('expense')">记支出</button>
     <button id="navAssets" onclick="showPage('assets')">总资产</button>
+    <button id="navInvest" onclick="showPage('invest')">投资</button>
     <button id="navLedger" onclick="showPage('ledger')">最近账目</button>
   </div>
 
@@ -208,6 +212,38 @@
 
     <div class="card-title">投资行情（真实净值·近30日）</div>
     <div class="quote-grid" id="quoteGrid"></div>
+  </div>
+
+  <!-- ===== 投资页 ===== -->
+  <div class="page" id="page-invest">
+    <div class="card-title">投资总览</div>
+    <div class="quote-grid" id="invOverview"></div>
+
+    <div class="card-title">行情走势</div>
+    <div class="pie-card" style="padding:10px 14px 6px">
+      <div class="quote-grid">
+        <div class="quote-card"><div class="q-head"><b>稳健理财</b></div><div id="invWenwenChart" style="width:100%;height:130px"></div></div>
+        <div class="quote-card"><div class="q-head"><b>个人投资</b></div><div id="invTouziChart" style="width:100%;height:130px"></div></div>
+      </div>
+    </div>
+
+    <div class="card-title">投入 / 赎回</div>
+    <div class="form-card">
+      <div class="field"><label>模块</label>
+        <select id="invModule"><option value="wenwen">稳健理财</option><option value="touzi">个人投资</option></select>
+      </div>
+      <div class="field"><label>金额（元）</label><input type="number" id="invAmount" placeholder="0.00"></div>
+      <div class="inv-actions">
+        <button class="btn" id="invAddBtn" style="width:49%">投入资金</button>
+        <button class="btn inv-red" id="invSubBtn" style="width:49%">赎回</button>
+      </div>
+    </div>
+
+    <div class="card-title">持仓流水</div>
+    <div class="ledger" id="invRecords"></div>
+
+    <div class="card-title">分析建议</div>
+    <div class="form-card" id="invAdvice"></div>
   </div>
 
   <!-- ===== 最近账目页 ===== -->
@@ -431,6 +467,86 @@
     }
   }
 
+  // ===== 投资页：总览 + 走势 + 流水 + 分析 =====
+  async function loadInvest() {
+    const [qRes, iRes] = await Promise.all([fetch("/api/quotes"), fetch("/api/invest")]);
+    const q = await qRes.json();
+    const inv = await iRes.json();
+
+    // ① 投资总览卡（本金/市值/总盈亏/单日盈亏）
+    const ov = document.getElementById("invOverview");
+    ov.innerHTML = "";
+    for (const key of ["wenwen", "touzi"]) {
+      const d = q[key];
+      const m = inv.modules[key];
+      if (!d || d.error) { ov.innerHTML += `<div class="quote-card"><div class="q-head"><b>${m.name}</b></div><div class="q-err">行情暂不可用</div></div>`; continue; }
+      const pcls = d.total_pnl >= 0 ? "up" : "down";
+      const dcls = d.day_pnl >= 0 ? "up" : "down";
+      ov.innerHTML += `
+        <div class="quote-card">
+          <div class="q-head"><b>${m.name}</b><span class="q-latest">市值 ${d.market_value} 元</span></div>
+          <div class="q-pnl">本金 ${m.principal} · 总盈亏 <i class="${pcls}">${d.total_pnl >= 0 ? "+" : ""}${d.total_pnl}</i> · 单日 <i class="${dcls}">${d.day_pnl >= 0 ? "+" : ""}${d.day_pnl}</i></div>
+          <div class="q-rec">区间 ${d.change >= 0 ? "+" : ""}${d.change}% · 更新 ${d.cached_at}</div>
+        </div>`;
+    }
+
+    // ② 行情走势
+    for (const [key, chartId] of [["wenwen", "invWenwenChart"], ["touzi", "invTouziChart"]]) {
+      const d = q[key];
+      const inst = echarts.init(document.getElementById(chartId));
+      quoteInsts[chartId] = inst;
+      inst.setOption({
+        grid: { left: 42, right: 8, top: 10, bottom: 22 },
+        xAxis: { type: "category", data: d.error ? [] : d.dates, show: false },
+        yAxis: { type: "value", axisLabel: { color: "#aaa", fontSize: 10 }, splitLine: { lineStyle: { color: "#f0f0f0" } } },
+        series: [{ type: "line", data: d.error ? [] : d.values, smooth: true, symbol: "none",
+                   lineStyle: { color: key === "touzi" ? "#2f5d50" : "#a3c4bb", width: 2 } }],
+      });
+    }
+
+    // ③ 持仓流水
+    const rec = document.getElementById("invRecords");
+    rec.innerHTML = "";
+    if (!inv.records.length) rec.innerHTML = `<div class="empty">暂无投入，点"投入资金"开始记账</div>`;
+    for (const r of inv.records) {
+      const name = r.module === "wenwen" ? "稳健理财" : "个人投资";
+      const op = r.action === "add" ? "投入" : "赎回";
+      rec.innerHTML += `
+        <div class="entry">
+          <div class="e-cat">${r.action === "add" ? "投" : "赎"}</div>
+          <div class="e-info">
+            <div class="e-name">${op}·${name}</div>
+            <div class="e-note">${r.date}</div>
+          </div>
+          <div class="e-amt">${r.action === "add" ? "+" : "-"}${r.amount}</div>
+        </div>`;
+    }
+
+    // ④ 分析建议
+    const w = q["wenwen"], t = q["touzi"];
+    let advice = "";
+    if (w && !w.error) advice += `<p>· 稳健理财（国债指数）近30日 ${w.change >= 0 ? "稳中有升 (+" + w.change + "%)" : w.change + "%"}，波动小，适合长期打底</p>`;
+    if (t && !t.error) advice += `<p>· 个人投资（沪深300）近30日 ${t.change >= 0 ? "走高 (+" + t.change + "%)" : "回调 (" + t.change + "%)"}，${t.change >= 0 ? "注意止盈与回调风险" : "可分批布局、摊低成本"}</p>`;
+    advice += `<p style="color:var(--text2);font-size:12px">· 净值取自东方财富真实行情，仅供参考，不构成投资建议</p>`;
+    document.getElementById("invAdvice").innerHTML = advice;
+  }
+
+  // 投入 / 赎回
+  async function doInvest(action) {
+    const module = document.getElementById("invModule").value;
+    const amount = Number(document.getElementById("invAmount").value) || 0;
+    if (amount <= 0) { alert("请输入金额"); return; }
+    await fetch("/api/invest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ module, action, amount }),
+    });
+    document.getElementById("invAmount").value = "";
+    loadInvest();
+  }
+  document.getElementById("invAddBtn").onclick = () => doInvest("add");
+  document.getElementById("invSubBtn").onclick = () => doInvest("remove");
+
   // ===== 资金设置（期初资金 + 投入本金 → 激活盈亏） =====
   async function loadSettings() {
     const res = await fetch("/api/settings");
@@ -501,6 +617,7 @@
   loadAssets();
   loadQuotes();
   loadSettings();
+  loadInvest();
 </script>
 </body>
 </html>

@@ -170,6 +170,14 @@ def _get_setting(conn, key, default="0"):
     return row["value"] if row else default
 
 
+def _get_principal(conn, key):
+    """该模块累计本金 = 投入(SUM add) − 赎回(SUM remove)"""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN action='add' THEN amount ELSE -amount END), 0) "
+        "FROM invest_records WHERE module=?", (key,)).fetchone()
+    return row[0]
+
+
 @router.get("/quotes")
 def quotes():
     """投资行情：先读本地缓存(5分钟内)，过期才拉 akshare 刷新；断网时返回最近缓存。
@@ -189,7 +197,7 @@ def quotes():
                         "INSERT OR REPLACE INTO quotes_cache(key, data, updated_at) VALUES(?,?,?)",
                         (key, json.dumps(fresh), now))
 
-            principal = float(_get_setting(conn, key + "_principal", "0"))   # 该模块投入本金
+            principal = _get_principal(conn, key)   # 该模块投入本金（流水累计）
             if data is None:
                 result[key] = {"name": name, "principal": principal, "error": "暂无行情（请检查网络）"}
             else:
@@ -200,3 +208,31 @@ def quotes():
                                "market_value": market_value, "total_pnl": total_pnl,
                                "day_pnl": day_pnl, "cached_at": _time.strftime("%m-%d %H:%M")}
     return result
+
+
+class InvestRec(BaseModel):
+    """一笔投资操作：投入/赎回"""
+    module: str        # wenwen稳健 / touzi投资
+    action: str        # add投入 / remove赎回
+    amount: float
+
+
+@router.post("/invest")
+def add_invest(rec: InvestRec):
+    """记录一笔投入/赎回（累计本金由流水自动计算）"""
+    today = _time.strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        conn.execute("INSERT INTO invest_records(date, module, action, amount) VALUES(?,?,?,?)",
+                     (today, rec.module, rec.action, rec.amount))
+    return {"ok": True}
+
+
+@router.get("/invest")
+def invest():
+    """投资总览：各模块累计本金 + 全部流水"""
+    with get_conn() as conn:
+        records = conn.execute("SELECT * FROM invest_records ORDER BY date DESC, id DESC").fetchall()
+        modules = {}
+        for key, name in QUOTES_TARGETS:
+            modules[key] = {"name": name, "principal": round(_get_principal(conn, key), 2)}
+    return {"modules": modules, "records": [dict(r) for r in records]}
