@@ -91,57 +91,25 @@
   <div class="total">
     <div class="t-left">
       <div class="label">本月可用</div>
-      <div class="num">6,400<span> 元</span></div>
+      <div class="num" id="availNum"></div>
     </div>
     <div class="t-right">
       <div class="label">本月收入</div>
-      <div class="income">+3,000</div>
-      <div class="ratio">占可用 47%</div>
+      <div class="income" id="incomeNum"></div>
+      <div class="ratio" id="incomeRatio"></div>
     </div>
   </div>
 
   <!-- 4 资金模块：应分配 + 当前 -->
-  <div class="modules">
-    <div class="mod">
-      <div class="m-name">应急救命<span class="m-pct">30%</span></div>
-      <div class="m-plan">应分配 <b>1,920</b></div>
-      <div class="m-now">当前 <b>2,000</b></div>
-    </div>
-    <div class="mod">
-      <div class="m-name">稳健理财<span class="m-pct">30%</span></div>
-      <div class="m-plan">应分配 <b>1,920</b></div>
-      <div class="m-now">当前 <b>1,900</b></div>
-    </div>
-    <div class="mod">
-      <div class="m-name">个人投资<span class="m-pct">30%</span></div>
-      <div class="m-plan">应分配 <b>1,920</b></div>
-      <div class="m-now">当前 <b>1,800</b></div>
-    </div>
-    <div class="mod">
-      <div class="m-name">日常娱乐<span class="m-pct">10%</span></div>
-      <div class="m-plan">应分配 <b>640</b></div>
-      <div class="m-now">当前 <b>700</b></div>
-    </div>
+  <div class="modules" id="modulesGrid">
   </div>
 
   <!-- 支出分布 -->
   <div class="card-title">本月支出分布</div>
   <div class="pie-card">
     <div class="pie-row">
-      <svg width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0">
-        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#2f5d50" stroke-width="7" stroke-dasharray="18 100"/>
-        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#4a8576" stroke-width="7" stroke-dasharray="12 100" stroke-dashoffset="-20"/>
-        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#a3c4bb" stroke-width="7" stroke-dasharray="8 100" stroke-dashoffset="-35"/>
-        <circle cx="21" cy="21" r="15.9" fill="none" stroke="#d9e8e4" stroke-width="7" stroke-dasharray="6 100" stroke-dashoffset="-45"/>
-        <text x="21" y="23" text-anchor="middle" font-size="5" fill="#2b2b2b" font-weight="700">1,240</text>
-        <text x="21" y="28" text-anchor="middle" font-size="3" fill="#8a8a8a">本月支出</text>
-      </svg>
-      <div class="pie-legend">
-        <div class="legend-item"><span class="dot" style="background:#2f5d50"></span>饮食<span class="amt">430</span></div>
-        <div class="legend-item"><span class="dot" style="background:#4a8576"></span>住房<span class="amt">300</span></div>
-        <div class="legend-item"><span class="dot" style="background:#a3c4bb"></span>交通<span class="amt">210</span></div>
-        <div class="legend-item"><span class="dot" style="background:#d9e8e4"></span>其他<span class="amt">300</span></div>
-      </div>
+      <svg id="pieSvg" width="150" height="150" viewBox="0 0 42 42" style="flex-shrink:0"></svg>
+      <div class="pie-legend" id="pieLegend"></div>
     </div>
   </div>
 
@@ -198,8 +166,59 @@
     });
     await res.json();
     loadLedger();
+    loadSummary();   // 记完一笔，饼图也跟着刷新
   }
   document.getElementById("addBtn").onclick = addEntry;
+
+  // ===== B：饼图接真实统计 =====
+  const PIE_COLORS = ["#2f5d50", "#4a8576", "#a3c4bb", "#d9e8e4", "#c8b6a6"];
+  async function loadSummary() {
+    const res = await fetch("/api/summary");
+    const data = await res.json();
+
+    const svg = document.getElementById("pieSvg");
+    const legend = document.getElementById("pieLegend");
+    const C = 2 * Math.PI * 15.9;          // 圆环周长
+    let offset = 0, svgInner = "", legendInner = "";
+
+    svgInner += `
+      <text x="21" y="23" text-anchor="middle" font-size="5" fill="#2b2b2b" font-weight="700">${data.total}</text>
+      <text x="21" y="28" text-anchor="middle" font-size="3" fill="#8a8a8a">本月支出</text>`;
+
+    data.categories.forEach((c, i) => {
+      const frac = data.total ? c.amount / data.total : 0;
+      const color = PIE_COLORS[i % PIE_COLORS.length];
+      svgInner += `<circle cx="21" cy="21" r="15.9" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${frac * C} ${C}" stroke-dashoffset="${-offset * C}"/>`;
+      offset += frac;
+      legendInner += `<div class="legend-item"><span class="dot" style="background:${color}"></span>${c.category}<span class="amt">${c.amount}</span></div>`;
+    });
+
+    svg.innerHTML = svgInner;
+    legend.innerHTML = legendInner;
+  }
+  loadSummary();
+
+  // ===== 资金概览：可用资金 + 4模块（预算规则模拟） =====
+  async function loadOverview() {
+    const res = await fetch("/api/overview");
+    const data = await res.json();
+
+    document.getElementById("availNum").innerHTML = `${data.available}<span> 元</span>`;
+    document.getElementById("incomeNum").textContent = "+" + data.income;
+    document.getElementById("incomeRatio").textContent = "占可用 " + Math.round(data.income / data.available * 100) + "%";
+
+    const grid = document.getElementById("modulesGrid");
+    grid.innerHTML = "";
+    for (const m of data.modules) {
+      grid.innerHTML += `
+        <div class="mod">
+          <div class="m-name">${m.name}<span class="m-pct">${m.pct}%</span></div>
+          <div class="m-plan">应分配 <b>${m.plan}</b></div>
+          <div class="m-now">当前 <b>${m.current}</b></div>
+        </div>`;
+    }
+  }
+  loadOverview();
 </script>
 </body>
 </html>
