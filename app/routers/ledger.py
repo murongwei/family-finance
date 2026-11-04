@@ -104,3 +104,26 @@ def trend():
         ).fetchall()
     rows = rows[::-1]   # 升序：早 → 晚
     return {"dates": [r["date"] for r in rows], "amounts": [r["total"] for r in rows]}
+
+
+@router.get("/quotes")
+def quotes():
+    """投资行情：稳健理财接国债指数(sh000012)、个人投资接沪深300(sh000300)
+    近30交易日真实净值走势 + 区间涨跌幅（akshare，依赖外网，失败时返回 error）"""
+    result = {}
+    targets = [("wenwen", "sh000012", "稳健理财"), ("touzi", "sh000300", "个人投资")]
+    try:
+        import akshare as ak
+        for key, sym, name in targets:
+            try:
+                df = ak.stock_zh_index_daily(symbol=sym).tail(30)
+                values = [round(float(x), 2) for x in df["close"].tolist()]
+                dates = [str(d)[:10] for d in df["date"].tolist()]
+                change = round((values[-1] - values[0]) / values[0] * 100, 2)
+                result[key] = {"name": name, "latest": values[-1],
+                               "change": change, "dates": dates, "values": values}
+            except Exception as e:
+                result[key] = {"name": name, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": "akshare 不可用: " + str(e)}
+    return result

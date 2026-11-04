@@ -53,6 +53,17 @@
   /* 预算完成度进度条 */
   .bar { height:6px; background:#eef4f2; border-radius:3px; margin-top:10px; overflow:hidden; }
   .bar i { display:block; height:100%; background:linear-gradient(90deg,#4a8576,#2f5d50); border-radius:3px; }
+  /* 行情卡片 */
+  .quote-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .quote-card { background:var(--card); border-radius:var(--radius); padding:16px 16px 6px;
+                box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .q-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .q-head b { font-size:14px; }
+  .q-latest { font-size:17px; font-weight:700; }
+  .q-latest i { font-style:normal; font-size:12px; font-weight:600; margin-left:6px; }
+  .up { color:#2f9d6a; }
+  .down { color:#c05b4a; }
+  .q-err { font-size:12px; color:var(--text2); padding:8px 0 10px; }
 
   .card-title { font-size:15px; font-weight:700; margin:26px 0 12px; }
   .pie-card { background:var(--card); border-radius:var(--radius); padding:14px 14px 8px;
@@ -172,6 +183,9 @@
     <div class="pie-card">
       <div id="assetChart" style="width:100%;height:235px"></div>
     </div>
+
+    <div class="card-title">投资行情（真实净值·近30日）</div>
+    <div class="quote-grid" id="quoteGrid"></div>
   </div>
 
   <!-- ===== 最近账目页 ===== -->
@@ -184,6 +198,7 @@
 <script src="echarts.min.js"></script>
 <script>
   let pieInst, trendInst, assetInst;   // ECharts 实例（切页后要 resize）
+  let quoteInsts = {};   // 行情折线实例（总资产页）
 
   // ===== 导航切换 =====
   function showPage(name) {
@@ -191,7 +206,7 @@
     document.getElementById("page-" + name).classList.add("active");
     document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
     document.getElementById("nav" + name[0].toUpperCase() + name.slice(1)).classList.add("active");
-    setTimeout(() => { [pieInst, trendInst, assetInst].forEach(i => i && i.resize()); }, 60);
+    setTimeout(() => { [pieInst, trendInst, assetInst, ...Object.values(quoteInsts)].forEach(i => i && i.resize()); }, 60);
   }
 
   // ===== 加载：最近账目 =====
@@ -310,6 +325,42 @@
     });
   }
 
+  // ===== 加载：投资行情（akshare 真实净值） =====
+  async function loadQuotes() {
+    const res = await fetch("/api/quotes");
+    const data = await res.json();
+    const grid = document.getElementById("quoteGrid");
+    grid.innerHTML = "";
+    for (const key of ["wenwen", "touzi"]) {
+      const q = data[key];
+      if (!q) continue;
+      if (q.error) {
+        grid.innerHTML += `<div class="quote-card"><div class="q-head"><b>${q.name}</b></div><div class="q-err">行情暂不可用</div></div>`;
+        continue;
+      }
+      const cls = q.change >= 0 ? "up" : "down";
+      const arrow = q.change >= 0 ? "+" + q.change : q.change;
+      grid.innerHTML += `
+        <div class="quote-card">
+          <div class="q-head"><b>${q.name}</b><span class="q-latest">${q.latest}<i class="${cls}">${arrow}%</i></span></div>
+          <div id="quote-${key}" style="width:100%;height:120px"></div>
+        </div>`;
+    }
+    for (const key of ["wenwen", "touzi"]) {
+      const q = data[key];
+      if (!q || q.error) continue;
+      const inst = echarts.init(document.getElementById("quote-" + key));
+      quoteInsts[key] = inst;
+      inst.setOption({
+        grid: { left: 42, right: 8, top: 10, bottom: 22 },
+        xAxis: { type: "category", data: q.dates, show: false },
+        yAxis: { type: "value", axisLabel: { color: "#aaa", fontSize: 10 }, splitLine: { lineStyle: { color: "#f0f0f0" } } },
+        series: [{ type: "line", data: q.values, smooth: true, symbol: "none",
+                   lineStyle: { color: key === "touzi" ? "#2f5d50" : "#a3c4bb", width: 2 } }],
+      });
+    }
+  }
+
   // ===== 记收入 =====
   async function addIncome() {
     const amount = document.getElementById("incAmount").value;
@@ -352,6 +403,7 @@
   loadTrend();
   loadOverview();
   loadAssets();
+  loadQuotes();
 </script>
 </body>
 </html>
