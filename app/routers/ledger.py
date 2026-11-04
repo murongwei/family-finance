@@ -233,6 +233,6 @@ def invest():
     with get_conn() as conn:
         records = conn.execute("SELECT * FROM invest_records ORDER BY date DESC, id DESC").fetchall()
         modules = {}
-        for key, name in QUOTES_TARGETS:
+        for key, _sym, name in QUOTES_TARGETS:
             modules[key] = {"name": name, "principal": round(_get_principal(conn, key), 2)}
     return {"modules": modules, "records": [dict(r) for r in records]}
