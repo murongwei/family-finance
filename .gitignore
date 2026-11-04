@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本地数据库（含测试数据，不进版本控制）
+family_finance.db
